@@ -69,7 +69,7 @@ type Model struct {
 // NewModel creates the initial TUI model.
 func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manager) Model {
 	// Build the status bar provider with the built-in fallback.
-	// The fallback is set later via updateStatusBar; the command comes from config.
+	// The command comes from config; refresh runs async via refreshStatusBar().
 	sbCmd := cfg.StatusBar.Command
 	if sbCmd == "" && cfg.CCUsage.Enabled && cfg.CCUsage.Command != "" {
 		sbCmd = cfg.CCUsage.Command
@@ -98,6 +98,10 @@ type prsLoadedMsg struct {
 }
 
 type statusRefreshMsg struct{}
+
+type statusBarUpdatedMsg struct {
+	text string
+}
 
 type sessionSpawnedMsg struct {
 	session *claude.Session
@@ -156,14 +160,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, cmd
 	case prsLoadedMsg:
-		m.prCache = msg.prs
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
+		} else {
+			m.prCache = msg.prs
 		}
 		return m, nil
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()
-		m.updateStatusBar()
+		cmd := m.refreshStatusBar()
+		return m, cmd
+	case statusBarUpdatedMsg:
+		m.statusBarText = msg.text
 		return m, nil
 	case sessionSpawnedMsg:
 		if msg.err != nil {
@@ -195,9 +203,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		return m, nil
 	case tickMsg:
 		m.sessions.RefreshStatuses()
-		m.updateStatusBar()
 		cmd := m.fetchPRs()
-		return m, tea.Batch(m.tickCmd(), cmd)
+		return m, tea.Batch(m.tickCmd(), cmd, m.refreshStatusBar())
 	case errMsg:
 		m.errorMsg = msg.err.Error()
 		return m, nil
@@ -497,49 +504,53 @@ func (m *Model) killSession() {
 	}
 }
 
-func (m *Model) updateStatusBar() {
-	// Try the external status bar provider first (custom command or ccusage)
-	if m.statusProv != nil {
-		m.statusProv.Refresh()
-		if text := m.statusProv.Text(); text != "" {
-			m.statusBarText = text
-			return
-		}
-	}
-
-	// Built-in fallback: session counts
+func (m *Model) refreshStatusBar() tea.Cmd {
+	prov := m.statusProv
 	sessions := m.sessions.Sessions()
-	var running, waiting, done, stopped int
-	for i := range sessions {
-		switch sessions[i].Status {
-		case claude.StatusRunning:
-			running++
-		case claude.StatusWaiting:
-			waiting++
-		case claude.StatusDone:
-			done++
-		case claude.StatusStopped:
-			stopped++
+
+	return func() tea.Msg {
+		// Try the external status bar provider first (custom command or ccusage).
+		// This may shell out, so it runs async to avoid blocking the event loop.
+		if prov != nil {
+			prov.Refresh()
+			if text := prov.Text(); text != "" {
+				return statusBarUpdatedMsg{text: text}
+			}
 		}
-	}
 
-	parts := []string{
-		fmt.Sprintf("Sessions: %d", len(sessions)),
-	}
-	if running > 0 {
-		parts = append(parts, fmt.Sprintf("⚡ %d working", running))
-	}
-	if waiting > 0 {
-		parts = append(parts, fmt.Sprintf("⏳ %d waiting", waiting))
-	}
-	if done > 0 {
-		parts = append(parts, fmt.Sprintf("✓ %d done", done))
-	}
-	if stopped > 0 {
-		parts = append(parts, fmt.Sprintf("✗ %d stopped", stopped))
-	}
+		// Built-in fallback: session counts
+		var running, waiting, done, stopped int
+		for i := range sessions {
+			switch sessions[i].Status {
+			case claude.StatusRunning:
+				running++
+			case claude.StatusWaiting:
+				waiting++
+			case claude.StatusDone:
+				done++
+			case claude.StatusStopped:
+				stopped++
+			}
+		}
 
-	m.statusBarText = strings.Join(parts, "  ")
+		parts := []string{
+			fmt.Sprintf("Sessions: %d", len(sessions)),
+		}
+		if running > 0 {
+			parts = append(parts, fmt.Sprintf("⚡ %d working", running))
+		}
+		if waiting > 0 {
+			parts = append(parts, fmt.Sprintf("⏳ %d waiting", waiting))
+		}
+		if done > 0 {
+			parts = append(parts, fmt.Sprintf("✓ %d done", done))
+		}
+		if stopped > 0 {
+			parts = append(parts, fmt.Sprintf("✗ %d stopped", stopped))
+		}
+
+		return statusBarUpdatedMsg{text: strings.Join(parts, "  ")}
+	}
 }
 
 // shellQuoteSession wraps a session name in single quotes for safe shell interpolation.
