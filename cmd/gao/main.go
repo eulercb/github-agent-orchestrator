@@ -15,7 +15,9 @@ import (
 	"github.com/eulercb/github-agent-orchestrator/internal/tui"
 )
 
-const version = "0.1.0"
+// version is set at build time via -ldflags "-X main.version=...".
+// Falls back to "dev" for local builds without ldflags.
+var version = "dev"
 
 func main() {
 	if len(os.Args) > 1 {

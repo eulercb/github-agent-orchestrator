@@ -1,5 +1,8 @@
 # gao — GitHub Agent Orchestrator
 
+[![Latest Release](https://img.shields.io/github/v/release/eulercb/github-agent-orchestrator?label=download&sort=semver)](https://github.com/eulercb/github-agent-orchestrator/releases/latest)
+[![CI](https://github.com/eulercb/github-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/eulercb/github-agent-orchestrator/actions/workflows/ci.yml)
+
 A terminal dashboard for spawning and managing [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions alongside GitHub issues and pull requests.
 
 ```
@@ -42,11 +45,24 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 
 ## Install
 
+### Download a release binary
+
+Pre-built binaries for Linux and macOS (amd64/arm64) are available on the [releases page](https://github.com/eulercb/github-agent-orchestrator/releases/latest).
+
+```bash
+# Example: download the latest release for Linux amd64
+curl -Lo gao.tar.gz https://github.com/eulercb/github-agent-orchestrator/releases/latest/download/gao_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz
+tar xzf gao.tar.gz
+sudo mv gao /usr/local/bin/
+```
+
+### Install with Go
+
 ```bash
 go install github.com/eulercb/github-agent-orchestrator/cmd/gao@latest
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/eulercb/github-agent-orchestrator.git
