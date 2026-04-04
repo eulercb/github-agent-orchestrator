@@ -80,3 +80,5 @@ jobs:
             | Linux arm64 | `gao_linux_arm64.tar.gz` |
             | macOS amd64 | `gao_darwin_amd64.tar.gz` |
             | macOS arm64 | `gao_darwin_arm64.tar.gz` |
+
+            > **macOS:** Run `xattr -d com.apple.quarantine ./gao` after extracting (binaries are unsigned).

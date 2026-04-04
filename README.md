@@ -58,6 +58,11 @@ tar xzf gao.tar.gz
 sudo mv gao /usr/local/bin/
 ```
 
+> **macOS note:** The release binaries are unsigned. macOS Gatekeeper may block the binary on first run. To allow it:
+> ```bash
+> xattr -d com.apple.quarantine /usr/local/bin/gao
+> ```
+
 ### Install with Go
 
 ```bash
