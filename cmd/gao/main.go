@@ -47,13 +47,18 @@ func run() error {
 	}
 
 	if len(cfg.Repos) == 0 {
-		fmt.Println("No repos configured. Run 'gao init' to set up your config.")
-		fmt.Printf("Config file: ")
 		p, pathErr := config.Path()
 		if pathErr != nil {
-			fmt.Printf("(unavailable: %v)\n", pathErr)
+			fmt.Fprintf(os.Stderr, "No repos configured and config path unavailable: %v\n", pathErr)
 		} else {
-			fmt.Println(p)
+			fmt.Printf("No repos configured. Add a repo to %s:\n\n", p)
+			fmt.Println("repos:")
+			fmt.Println("  - owner: your-github-username")
+			fmt.Println("    name: your-repo-name")
+			fmt.Println("    filters:")
+			fmt.Println("      assignee: '@me'")
+			fmt.Println("      state: open")
+			fmt.Println()
 		}
 		return nil
 	}
@@ -92,16 +97,8 @@ func runInit() {
 	}
 
 	cfg := config.DefaultConfig()
-	cfg.Repos = []config.RepoConfig{
-		{
-			Owner: "your-username",
-			Name:  "your-repo",
-			Filters: config.IssueFilters{
-				Assignee: "@me",
-				State:    "open",
-			},
-		},
-	}
+	// Leave repos empty so the user is prompted to configure on first run.
+	cfg.Repos = []config.RepoConfig{}
 
 	if err := config.Save(&cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
