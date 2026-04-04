@@ -49,13 +49,13 @@ spawn:
 
 # How to attach to a running session.
 attach:
-  # Shell command template for attaching. {{.Session}} is replaced with the
-  # raw tmux session name. The command is executed via sh -c, so quote the
-  # placeholder if session names may contain spaces or special characters:
-  #   command: "tmux attach-session -t '{{.Session}}'"
+  # Shell command template for attaching. Available template variables:
+  #   {{.Session}}       - raw tmux session name
+  #   {{.SessionQuoted}} - shell-quoted session name (safe for sh -c)
+  # The command is executed via sh -c.
   # Used when Warp is not available.
-  # Default: "tmux attach-session -t {{.Session}}"
-  command: "tmux attach-session -t {{.Session}}"
+  # Default: "tmux attach-session -t {{.SessionQuoted}}"
+  command: "tmux attach-session -t {{.SessionQuoted}}"
 
   # Force Warp tab behavior on/off. When unset (null), gao auto-detects
   # Warp by checking if warp-cli is on PATH.

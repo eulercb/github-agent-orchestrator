@@ -76,7 +76,7 @@ func DefaultConfig() Config {
 			Command: "",
 		},
 		Attach: AttachConfig{
-			Command: "tmux attach-session -t {{.Session}}",
+			Command: "tmux attach-session -t {{.SessionQuoted}}",
 		},
 		CCUsage: CCUsageConfig{
 			Enabled: false,

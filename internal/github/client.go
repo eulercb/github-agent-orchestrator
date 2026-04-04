@@ -42,16 +42,7 @@ type PullRequest struct {
 	URL               string     `json:"url"`
 	Draft             bool       `json:"isDraft"`
 	HeadRef           string     `json:"headRefName"`
-	Mergeable         string     `json:"mergeable"`
-	ReviewDecision    string     `json:"reviewDecision"`
-	StatusCheckRollup []CheckRun `json:"statusCheckRollup"`
-}
-
-// CheckRun represents a CI check.
-type CheckRun struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
+	ReviewDecision string `json:"reviewDecision"`
 }
 
 // PRStatus summarizes the state of a PR for display.
@@ -59,7 +50,6 @@ type PRStatus struct {
 	State            string // OPEN, MERGED, CLOSED
 	Draft            bool
 	Approved         bool
-	CIPass           bool
 	ChangesRequested bool
 	ReviewRequired   bool
 }
@@ -108,7 +98,7 @@ func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, err
 		"--repo", repoFullName,
 		"--head", branch,
 		"--state", "all",
-		"--json", "number,title,state,url,isDraft,headRefName,mergeable,reviewDecision",
+		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision",
 		"--limit", "1",
 	}
 
