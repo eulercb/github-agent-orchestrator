@@ -260,8 +260,12 @@ func (m *Model) moveCursor(delta int) {
 		if m.issuesCursor < 0 {
 			m.issuesCursor = 0
 		}
-		if m.issuesCursor >= len(m.issues) {
-			m.issuesCursor = len(m.issues) - 1
+		lastIdx := len(m.issues) - 1
+		if lastIdx < 0 {
+			lastIdx = 0
+		}
+		if m.issuesCursor > lastIdx {
+			m.issuesCursor = lastIdx
 		}
 	case PanelSessions:
 		sessions := m.sessions.Sessions()
@@ -269,8 +273,12 @@ func (m *Model) moveCursor(delta int) {
 		if m.sessionCursor < 0 {
 			m.sessionCursor = 0
 		}
-		if m.sessionCursor >= len(sessions) {
-			m.sessionCursor = len(sessions) - 1
+		lastIdx := len(sessions) - 1
+		if lastIdx < 0 {
+			lastIdx = 0
+		}
+		if m.sessionCursor > lastIdx {
+			m.sessionCursor = lastIdx
 		}
 	}
 }
@@ -413,7 +421,7 @@ func (m *Model) resolveAttachCommand(sessionName string) string {
 	}
 
 	var buf strings.Builder
-	data := struct{ Session string }{Session: sessionName}
+	data := struct{ Session string }{Session: shellQuoteSession(sessionName)}
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "tmux attach-session -t " + sessionName
 	}
@@ -507,6 +515,11 @@ func (m *Model) updateStatusBar() {
 	}
 
 	m.statusBarText = strings.Join(parts, "  ")
+}
+
+// shellQuoteSession wraps a session name in single quotes for safe shell interpolation.
+func shellQuoteSession(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func (m *Model) tickCmd() tea.Cmd {

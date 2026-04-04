@@ -150,8 +150,9 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 	if maxTitleLen < 0 {
 		maxTitleLen = 0
 	}
-	if len(title) > maxTitleLen {
-		title = title[:maxTitleLen] + "..."
+	titleRunes := []rune(title)
+	if len(titleRunes) > maxTitleLen {
+		title = string(titleRunes[:maxTitleLen]) + "..."
 	}
 
 	var labels []string
@@ -337,10 +338,18 @@ func (m *Model) viewHelp() string {
   Sessions auto-refresh every 10 seconds.
   Press Esc to return to dashboard.
 `
-	return styles.BorderedBox.Width(m.width - 4).Render(help)
+	width := m.width - 4
+	if width < 0 {
+		width = 0
+	}
+	return styles.BorderedBox.Width(width).Render(help)
 }
 
 func (m *Model) viewConfirm() string {
 	content := fmt.Sprintf("\n  %s\n\n  Press y to confirm, n to cancel.\n", m.confirmMsg)
-	return styles.BorderedBox.Width(m.width - 4).Render(content)
+	width := m.width - 4
+	if width < 0 {
+		width = 0
+	}
+	return styles.BorderedBox.Width(width).Render(content)
 }

@@ -33,7 +33,7 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 
 | Tool | Required | Purpose |
 |------|----------|---------|
-| [Go](https://go.dev/) 1.23+ | Build only | Compiling gao |
+| [Go](https://go.dev/) 1.24+ | Build only | Compiling gao |
 | [gh](https://cli.github.com/) | Yes | GitHub API (issues, PRs) |
 | [tmux](https://github.com/tmux/tmux) | Yes | Background sessions |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Yes | The AI agent |

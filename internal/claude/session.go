@@ -81,7 +81,7 @@ func (m *Manager) Sessions() []Session {
 
 // SpawnSession creates a new Claude Code session for an issue.
 func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTitle string) (*Session, error) {
-	sessionName := fmt.Sprintf("gao-%s-%d", repo.Name, issueNumber)
+	sessionName := fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
 	branch := fmt.Sprintf("claude/issue-%d", issueNumber)
 
 	// Check if session already exists
@@ -115,7 +115,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		worktreePath = filepath.Join(repoDir, ".worktrees", branch)
 		worktreeParent := filepath.Dir(worktreePath)
 		fullCmd = fmt.Sprintf(
-			"cd %s && git fetch origin && mkdir -p %s && git worktree add %s -b %s origin/%s 2>/dev/null; cd %s && %s",
+			"cd %s && git fetch origin && mkdir -p %s && git worktree add %s -b %s origin/%s && cd %s && %s",
 			shellQuote(repoDir),
 			shellQuote(worktreeParent),
 			shellQuote(worktreePath),
@@ -125,7 +125,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 			spawnCmd,
 		)
 	} else {
-		fullCmd = fmt.Sprintf("cd %s && git checkout -b %s 2>/dev/null; git checkout %s && %s",
+		fullCmd = fmt.Sprintf("cd %s && (git checkout %s || git checkout -b %s) && %s",
 			shellQuote(repoDir),
 			shellQuote(branch),
 			shellQuote(branch),
