@@ -125,10 +125,20 @@ func runInit() {
 			},
 		}
 
-		if issueOwner != "" && issueName != "" {
+		// Default blank issue source fields to the main repo values.
+		resolvedIssueOwner := issueOwner
+		if resolvedIssueOwner == "" {
+			resolvedIssueOwner = owner
+		}
+		resolvedIssueName := issueName
+		if resolvedIssueName == "" {
+			resolvedIssueName = name
+		}
+
+		if resolvedIssueOwner != owner || resolvedIssueName != name {
 			repo.IssueSource = &config.IssueSource{
-				Owner: issueOwner,
-				Name:  issueName,
+				Owner: resolvedIssueOwner,
+				Name:  resolvedIssueName,
 			}
 		}
 

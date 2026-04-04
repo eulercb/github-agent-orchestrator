@@ -110,6 +110,18 @@ func TestIssueRepoFullName(t *testing.T) {
 	if r.IssueRepoFullName() != "foo/bar" {
 		t.Errorf("expected foo/bar for empty issue source, got %s", r.IssueRepoFullName())
 	}
+
+	// Partial IssueSource: only Name set, Owner inherited from main repo
+	r.IssueSource = &IssueSource{Owner: "", Name: "other-repo"}
+	if r.IssueRepoFullName() != "foo/other-repo" {
+		t.Errorf("expected foo/other-repo for partial issue source, got %s", r.IssueRepoFullName())
+	}
+
+	// Partial IssueSource: only Owner set, Name inherited from main repo
+	r.IssueSource = &IssueSource{Owner: "other-org", Name: ""}
+	if r.IssueRepoFullName() != "other-org/bar" {
+		t.Errorf("expected other-org/bar for partial issue source, got %s", r.IssueRepoFullName())
+	}
 }
 
 func TestSaveAndLoadWithIssueSource(t *testing.T) {

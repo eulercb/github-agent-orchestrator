@@ -40,13 +40,24 @@ func (r *RepoConfig) FullName() string {
 }
 
 // IssueRepoFullName returns the repo to fetch issues from.
-// If IssueSource is configured, it returns the issue source repo;
+// If IssueSource is configured, non-empty fields override the main repo;
 // otherwise it falls back to the main repo.
 func (r *RepoConfig) IssueRepoFullName() string {
-	if r.IssueSource != nil && r.IssueSource.Owner != "" && r.IssueSource.Name != "" {
-		return r.IssueSource.Owner + "/" + r.IssueSource.Name
+	if r.IssueSource == nil {
+		return r.FullName()
 	}
-	return r.FullName()
+
+	owner := r.Owner
+	name := r.Name
+
+	if r.IssueSource.Owner != "" {
+		owner = r.IssueSource.Owner
+	}
+	if r.IssueSource.Name != "" {
+		name = r.IssueSource.Name
+	}
+
+	return owner + "/" + name
 }
 
 // IssueFilters controls which issues are shown.
