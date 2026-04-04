@@ -446,7 +446,7 @@ func (m *Model) attachSession() tea.Cmd {
 func (m *Model) resolveAttachCommand(sessionName string) string {
 	cmdTmpl := m.cfg.Attach.Command
 	if cmdTmpl == "" {
-		cmdTmpl = "tmux attach-session -t {{.Session}}"
+		cmdTmpl = "tmux attach-session -t '{{.Session}}'"
 	}
 
 	tmpl, err := template.New("attach").Parse(cmdTmpl)
@@ -455,7 +455,7 @@ func (m *Model) resolveAttachCommand(sessionName string) string {
 	}
 
 	var buf strings.Builder
-	data := struct{ Session string }{Session: shellQuoteSession(sessionName)}
+	data := struct{ Session string }{Session: sessionName}
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return "tmux attach-session -t " + shellQuoteSession(sessionName)
 	}

@@ -50,7 +50,10 @@ spawn:
 # How to attach to a running session.
 attach:
   # Shell command template for attaching. {{.Session}} is replaced with the
-  # tmux session name. Used when Warp is not available.
+  # raw tmux session name. The command is executed via sh -c, so quote the
+  # placeholder if session names may contain spaces or special characters:
+  #   command: "tmux attach-session -t '{{.Session}}'"
+  # Used when Warp is not available.
   # Default: "tmux attach-session -t {{.Session}}"
   command: "tmux attach-session -t {{.Session}}"
 

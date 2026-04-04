@@ -107,6 +107,7 @@ func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, err
 	args := []string{"pr", "list",
 		"--repo", repoFullName,
 		"--head", branch,
+		"--state", "all",
 		"--json", "number,title,state,url,isDraft,headRefName,mergeable,reviewDecision",
 		"--limit", "1",
 	}

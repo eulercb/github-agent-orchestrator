@@ -72,21 +72,29 @@ func (c *Client) KillSession(name string) error {
 
 // IsProcessRunning checks if a process matching a pattern is running in the session.
 func (c *Client) IsProcessRunning(session, pattern string) bool {
-	// Get the pane PID and check child processes
+	// Get the pane PIDs and check child processes for each pane.
 	out, err := run("list-panes", "-t", session, "-F", "#{pane_pid}")
 	if err != nil {
 		return false
 	}
-	pid := strings.TrimSpace(out)
-	if pid == "" {
-		return false
+
+	for _, pid := range strings.Split(out, "\n") {
+		pid = strings.TrimSpace(pid)
+		if pid == "" {
+			continue
+		}
+
+		// Check if any child process for this pane matches the pattern.
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		cmd := exec.CommandContext(ctx, "pgrep", "-P", pid, "-f", pattern)
+		err := cmd.Run()
+		cancel()
+		if err == nil {
+			return true
+		}
 	}
 
-	// Check if any child process matches the pattern
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "pgrep", "-P", pid, "-f", pattern)
-	return cmd.Run() == nil
+	return false
 }
 
 func run(args ...string) (string, error) {

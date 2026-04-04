@@ -251,7 +251,8 @@ func (m *Manager) FindByIssue(repo string, issueNumber int) *Session {
 
 	for i := range m.sessions {
 		if m.sessions[i].Repo == repo && m.sessions[i].IssueNumber == issueNumber {
-			return &m.sessions[i]
+			sess := m.sessions[i]
+			return &sess
 		}
 	}
 	return nil

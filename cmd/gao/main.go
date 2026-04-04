@@ -82,6 +82,9 @@ func runInit() {
 	if _, err := os.Stat(cfgPath); err == nil {
 		fmt.Printf("Config already exists at %s\n", cfgPath)
 		return
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "gao: stat config %s: %v\n", cfgPath, err)
+		os.Exit(1)
 	}
 
 	cfg := config.DefaultConfig()
