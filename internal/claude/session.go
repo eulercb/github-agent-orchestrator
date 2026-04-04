@@ -92,10 +92,12 @@ func (m *Manager) Sessions() []Session {
 func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTitle string) (*Session, error) {
 	var sessionName, branch string
 	if repo.IssueSource != nil && repo.IssueRepoFullName() != repo.FullName() {
-		// Include issue source repo name to avoid collisions when issues
-		// come from a different repo than where PRs are opened.
-		sessionName = fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, repo.IssueSource.Name, issueNumber)
-		branch = fmt.Sprintf("claude/issue-%s-%d", repo.IssueSource.Name, issueNumber)
+		// Include the effective issue source repo identifier to avoid collisions
+		// when issues come from a different repo than where PRs are opened,
+		// including configurations where IssueSource overrides only the owner.
+		issueRepoID := strings.ReplaceAll(repo.IssueRepoFullName(), "/", "-")
+		sessionName = fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, issueRepoID, issueNumber)
+		branch = fmt.Sprintf("claude/issue-%s-%d", issueRepoID, issueNumber)
 	} else {
 		sessionName = fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
 		branch = fmt.Sprintf("claude/issue-%d", issueNumber)
