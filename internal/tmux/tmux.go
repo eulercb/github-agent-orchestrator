@@ -27,13 +27,14 @@ func (c *Client) SessionExists(name string) bool {
 }
 
 // NewSession creates a new tmux session in detached mode.
+// When command is provided, it is treated as a shell command line.
 func (c *Client) NewSession(name, workDir, command string) error {
 	args := []string{"new-session", "-d", "-s", name}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
 	if command != "" {
-		args = append(args, "--", command)
+		args = append(args, "--", "sh", "-c", command)
 	}
 	_, err := run(args...)
 	if err != nil {
