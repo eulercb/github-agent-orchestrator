@@ -50,8 +50,10 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 Pre-built binaries for Linux and macOS (amd64/arm64) are available on the [releases page](https://github.com/eulercb/github-agent-orchestrator/releases/latest).
 
 ```bash
-# Example: download the latest release for Linux amd64
-curl -Lo gao.tar.gz https://github.com/eulercb/github-agent-orchestrator/releases/latest/download/gao_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz
+# Example: download the latest release for your platform
+version="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/eulercb/github-agent-orchestrator/releases/latest | sed 's#.*/tag/v##')"
+arch="$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+curl -fLo gao.tar.gz "https://github.com/eulercb/github-agent-orchestrator/releases/download/v${version}/gao_${version}_$(uname -s | tr '[:upper:]' '[:lower:]')_${arch}.tar.gz"
 tar xzf gao.tar.gz
 sudo mv gao /usr/local/bin/
 ```

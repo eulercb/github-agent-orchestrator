@@ -64,9 +64,6 @@ type Model struct {
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
-
-	// Ticker for auto-refresh
-	lastRefresh time.Time
 }
 
 // NewModel creates the initial TUI model.
@@ -199,7 +196,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case tickMsg:
 		m.sessions.RefreshStatuses()
 		m.updateStatusBar()
-		m.lastRefresh = time.Now()
 		cmd := m.fetchPRs()
 		return m, tea.Batch(m.tickCmd(), cmd)
 	case errMsg:

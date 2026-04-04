@@ -147,6 +147,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	}
 
 	if err := m.tmux.SendKeys(sessionName, fullCmd); err != nil {
+		_ = m.tmux.KillSession(sessionName)
 		return nil, fmt.Errorf("send spawn command: %w", err)
 	}
 
