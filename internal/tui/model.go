@@ -147,6 +147,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		} else {
 			m.issues = msg.issues
 			m.errorMsg = ""
+			// Clamp cursor to new list bounds
+			lastIdx := len(m.issues) - 1
+			if lastIdx < 0 {
+				lastIdx = 0
+			}
+			if m.issuesCursor > lastIdx {
+				m.issuesCursor = lastIdx
+			}
 		}
 		cmd := m.fetchPRs()
 		return m, cmd
@@ -171,6 +179,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case sessionKilledMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Kill failed: %v", msg.err)
+		} else {
+			// Clamp cursor after removal
+			sessions := m.sessions.Sessions()
+			lastIdx := len(sessions) - 1
+			if lastIdx < 0 {
+				lastIdx = 0
+			}
+			if m.sessionCursor > lastIdx {
+				m.sessionCursor = lastIdx
+			}
 		}
 		return m, nil
 	case openBrowserMsg:
@@ -428,13 +446,13 @@ func (m *Model) resolveAttachCommand(sessionName string) string {
 
 	tmpl, err := template.New("attach").Parse(cmdTmpl)
 	if err != nil {
-		return "tmux attach-session -t " + sessionName
+		return "tmux attach-session -t " + shellQuoteSession(sessionName)
 	}
 
 	var buf strings.Builder
 	data := struct{ Session string }{Session: shellQuoteSession(sessionName)}
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return "tmux attach-session -t " + sessionName
+		return "tmux attach-session -t " + shellQuoteSession(sessionName)
 	}
 	return buf.String()
 }

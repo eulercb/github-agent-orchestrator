@@ -323,7 +323,6 @@ func (m *Model) viewHelp() string {
   Navigation:
     ↑/k, ↓/j    Move cursor up/down
     Tab          Switch between Issues and Sessions panels
-    Enter        Select / confirm
     Esc          Go back
 
   Actions:
