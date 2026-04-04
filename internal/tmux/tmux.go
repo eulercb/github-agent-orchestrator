@@ -26,7 +26,7 @@ func NewClient() *Client {
 // ListSessions returns all tmux sessions.
 func (c *Client) ListSessions() ([]Session, error) {
 	out, err := run("list-sessions", "-F",
-		"#{session_name}\t#{session_created_string}\t#{session_attached}\t#{session_windows}")
+		"#{session_name}\t#{session_created_string}\t#{session_attached}")
 	if err != nil {
 		if strings.Contains(err.Error(), "no server running") ||
 			strings.Contains(err.Error(), "no sessions") {
@@ -40,8 +40,8 @@ func (c *Client) ListSessions() ([]Session, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 4)
-		if len(parts) < 4 {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
 			continue
 		}
 		sessions = append(sessions, Session{

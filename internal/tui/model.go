@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -14,6 +15,7 @@ import (
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
+	"github.com/eulercb/github-agent-orchestrator/internal/statusbar"
 )
 
 // Panel identifies which panel is focused.
@@ -35,11 +37,17 @@ const (
 	ViewConfirm
 )
 
+// prCacheKey builds a unique key for the PR cache from repo and branch.
+func prCacheKey(repo, branch string) string {
+	return repo + ":" + branch
+}
+
 // Model is the top-level Bubble Tea model.
 type Model struct {
 	cfg           *config.Config
 	gh            *github.Client
 	sessions      *claude.Manager
+	statusProv    *statusbar.Provider
 	keys          KeyMap
 	width, height int
 
@@ -47,7 +55,7 @@ type Model struct {
 	currentView   View
 	activePanel   Panel
 	issues        []github.Issue
-	prCache       map[string]*github.PullRequest // branch -> PR
+	prCache       map[string]*github.PullRequest // "repo:branch" -> PR
 	issuesCursor  int
 	sessionCursor int
 	repoIndex     int
@@ -63,12 +71,20 @@ type Model struct {
 
 // NewModel creates the initial TUI model.
 func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manager) Model {
+	// Build the status bar provider with the built-in fallback.
+	// The fallback is set later via updateStatusBar; the command comes from config.
+	sbCmd := cfg.StatusBar.Command
+	if sbCmd == "" && cfg.CCUsage.Enabled && cfg.CCUsage.Command != "" {
+		sbCmd = cfg.CCUsage.Command
+	}
+
 	return Model{
-		cfg:      cfg,
-		gh:       ghClient,
-		sessions: sessMgr,
-		keys:     DefaultKeyMap(),
-		prCache:  make(map[string]*github.PullRequest),
+		cfg:        cfg,
+		gh:         ghClient,
+		sessions:   sessMgr,
+		statusProv: statusbar.NewProvider(sbCmd, nil),
+		keys:       DefaultKeyMap(),
+		prCache:    make(map[string]*github.PullRequest),
 	}
 }
 
@@ -214,16 +230,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Down):
 		m.moveCursor(1)
 	case key.Matches(msg, m.keys.Spawn):
-		cmd := m.spawnSession()
-		return m, cmd
+		if m.activePanel == PanelIssues {
+			cmd := m.spawnSession()
+			return m, cmd
+		}
 	case key.Matches(msg, m.keys.Attach):
-		cmd := m.attachSession()
-		return m, cmd
+		if m.activePanel == PanelSessions {
+			cmd := m.attachSession()
+			return m, cmd
+		}
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd
 	case key.Matches(msg, m.keys.Delete):
-		m.killSession()
+		if m.activePanel == PanelSessions {
+			m.killSession()
+		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
 		return m, tea.Batch(m.fetchIssues(), m.refreshStatuses())
@@ -299,7 +321,7 @@ func (m *Model) fetchPRs() tea.Cmd {
 			}
 			pr, err := m.gh.FindPRForBranch(s.Repo, s.Branch)
 			if err == nil && pr != nil {
-				prs[s.Branch] = pr
+				prs[prCacheKey(s.Repo, s.Branch)] = pr
 			}
 		}
 		return prsLoadedMsg{prs: prs}
@@ -364,16 +386,38 @@ func (m *Model) attachSession() tea.Cmd {
 		}
 	}
 
-	// Default: suspend TUI, attach, resume
+	// Use the configurable attach command template, falling back to tmux attach
+	attachCmd := m.resolveAttachCommand(sessionName)
+
 	return tea.ExecProcess(
-		exec.CommandContext(context.Background(), "tmux", "attach-session", "-t", sessionName),
+		exec.CommandContext(context.Background(), "sh", "-c", attachCmd),
 		func(err error) tea.Msg {
 			if err != nil {
-				return errMsg{err: fmt.Errorf("tmux attach: %w", err)}
+				return errMsg{err: fmt.Errorf("attach: %w", err)}
 			}
 			return statusRefreshMsg{}
 		},
 	)
+}
+
+// resolveAttachCommand applies the session name to the attach command template.
+func (m *Model) resolveAttachCommand(sessionName string) string {
+	cmdTmpl := m.cfg.Attach.Command
+	if cmdTmpl == "" {
+		cmdTmpl = "tmux attach-session -t {{.Session}}"
+	}
+
+	tmpl, err := template.New("attach").Parse(cmdTmpl)
+	if err != nil {
+		return "tmux attach-session -t " + sessionName
+	}
+
+	var buf strings.Builder
+	data := struct{ Session string }{Session: sessionName}
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "tmux attach-session -t " + sessionName
+	}
+	return buf.String()
 }
 
 func (m *Model) openInBrowser() tea.Cmd {
@@ -384,19 +428,21 @@ func (m *Model) openInBrowser() tea.Cmd {
 			return nil
 		}
 		url := issue.URL
+		ghClient := m.gh
 		return func() tea.Msg {
-			return openBrowserMsg{err: openURL(url)}
+			return openBrowserMsg{err: ghClient.OpenInBrowser(url)}
 		}
 	case PanelSessions:
 		sess := m.selectedSession()
 		if sess == nil {
 			return nil
 		}
-		pr, ok := m.prCache[sess.Branch]
+		pr, ok := m.prCache[prCacheKey(sess.Repo, sess.Branch)]
 		if ok && pr != nil {
 			url := pr.URL
+			ghClient := m.gh
 			return func() tea.Msg {
-				return openBrowserMsg{err: openURL(url)}
+				return openBrowserMsg{err: ghClient.OpenInBrowser(url)}
 			}
 		}
 	}
@@ -419,6 +465,16 @@ func (m *Model) killSession() {
 }
 
 func (m *Model) updateStatusBar() {
+	// Try the external status bar provider first (custom command or ccusage)
+	if m.statusProv != nil {
+		m.statusProv.Refresh()
+		if text := m.statusProv.Text(); text != "" {
+			m.statusBarText = text
+			return
+		}
+	}
+
+	// Built-in fallback: session counts
 	sessions := m.sessions.Sessions()
 	var running, waiting, done, stopped int
 	for i := range sessions {
@@ -457,14 +513,4 @@ func (m *Model) tickCmd() tea.Cmd {
 	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
-}
-
-func openURL(url string) error {
-	// Try macOS first, then Linux
-	cmd := exec.CommandContext(context.Background(), "open", url)
-	if err := cmd.Run(); err != nil {
-		cmd = exec.CommandContext(context.Background(), "xdg-open", url)
-		return cmd.Run()
-	}
-	return nil
 }

@@ -52,7 +52,7 @@ type Manager struct {
 
 // NewManager creates a session manager.
 func NewManager(cfg *config.Config, tmuxClient *tmux.Client) (*Manager, error) {
-	stateFile, err := config.SessionsPath()
+	stateFile, err := config.SessionsPath(cfg.SessionDir)
 	if err != nil {
 		return nil, err
 	}
@@ -101,15 +101,26 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		spawnCmd = "claude --dangerously-skip-permissions"
 	}
 
+	// Determine base branch for worktree
+	baseBranch := m.cfg.Spawn.BaseBranch
+	if baseBranch == "" {
+		// Use symbolic ref to derive the default branch
+		baseBranch = "$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo main)"
+	}
+
 	// Compose the full command: optionally create worktree, then run claude
 	var fullCmd string
-	if m.cfg.Spawn.UseWorktee {
-		worktreePath := filepath.Join(repoDir, ".worktrees", branch)
+	var worktreePath string
+	if m.cfg.Spawn.UseWorktree {
+		worktreePath = filepath.Join(repoDir, ".worktrees", branch)
+		worktreeParent := filepath.Dir(worktreePath)
 		fullCmd = fmt.Sprintf(
-			"cd %s && git fetch origin && git worktree add %s -b %s origin/main 2>/dev/null; cd %s && %s",
+			"cd %s && git fetch origin && mkdir -p %s && git worktree add %s -b %s origin/%s 2>/dev/null; cd %s && %s",
 			shellQuote(repoDir),
+			shellQuote(worktreeParent),
 			shellQuote(worktreePath),
 			shellQuote(branch),
+			baseBranch,
 			shellQuote(worktreePath),
 			spawnCmd,
 		)
@@ -131,14 +142,20 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	}
 
 	sess := Session{
-		ID:          sessionName,
-		IssueNumber: issueNumber,
-		IssueTitle:  issueTitle,
-		Repo:        repo.FullName(),
-		Branch:      branch,
-		TmuxSession: sessionName,
-		CreatedAt:   time.Now(),
-		Status:      StatusRunning,
+		ID:           sessionName,
+		IssueNumber:  issueNumber,
+		IssueTitle:   issueTitle,
+		Repo:         repo.FullName(),
+		Branch:       branch,
+		TmuxSession:  sessionName,
+		WorktreePath: worktreePath,
+		CreatedAt:    time.Now(),
+		Status:       StatusRunning,
+	}
+
+	// When not using worktrees, set WorktreePath to the repo dir
+	if !m.cfg.Spawn.UseWorktree {
+		sess.WorktreePath = repoDir
 	}
 
 	m.mu.Lock()

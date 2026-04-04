@@ -40,9 +40,10 @@ type IssueFilters struct {
 
 // SpawnConfig controls how Claude Code sessions are created.
 type SpawnConfig struct {
-	Command    string `yaml:"command"`
-	UseWorktee bool   `yaml:"use_worktree"`
-	RepoDir    string `yaml:"repo_dir"`
+	Command     string `yaml:"command"`
+	UseWorktree bool   `yaml:"use_worktree"`
+	RepoDir     string `yaml:"repo_dir"`
+	BaseBranch  string `yaml:"base_branch"`
 }
 
 // StatusBar configures the bottom status bar.
@@ -67,8 +68,9 @@ func DefaultConfig() Config {
 	return Config{
 		Repos: []RepoConfig{},
 		Spawn: SpawnConfig{
-			Command:    "claude --dangerously-skip-permissions",
-			UseWorktee: true,
+			Command:     "claude --dangerously-skip-permissions",
+			UseWorktree: true,
+			BaseBranch:  "",
 		},
 		StatusBar: StatusBar{
 			Command: "",
@@ -103,7 +105,11 @@ func Path() (string, error) {
 }
 
 // SessionsPath returns the path for the sessions state file.
-func SessionsPath() (string, error) {
+// If sessionDir is non-empty, it is used instead of the default config dir.
+func SessionsPath(sessionDir string) (string, error) {
+	if sessionDir != "" {
+		return filepath.Join(sessionDir, "sessions.yaml"), nil
+	}
 	dir, err := Dir()
 	if err != nil {
 		return "", err

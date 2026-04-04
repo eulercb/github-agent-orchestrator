@@ -70,7 +70,7 @@ Key message types:
 | Message | Trigger | Effect |
 |---------|---------|--------|
 | `issuesLoadedMsg` | `fetchIssues` completes | Populates issue list, fires `fetchPRs` |
-| `prsLoadedMsg` | `fetchPRs` completes | Populates PR cache (branch → PR) |
+| `prsLoadedMsg` | `fetchPRs` completes | Populates PR cache (repo:branch → PR) |
 | `statusRefreshMsg` | Manual refresh or after attach | Calls `Manager.RefreshStatuses()` |
 | `sessionSpawnedMsg` | `SpawnSession` completes | Adds session, switches to Sessions panel |
 | `tickMsg` | Every 10 seconds | Refreshes statuses and PR cache |

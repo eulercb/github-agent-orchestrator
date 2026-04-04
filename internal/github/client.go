@@ -55,11 +55,12 @@ type CheckRun struct {
 
 // PRStatus summarizes the state of a PR for display.
 type PRStatus struct {
-	State             string // OPEN, MERGED, CLOSED
-	Draft             bool
-	Approved          bool
-	CIPass            bool
-	HasPendingReviews bool
+	State            string // OPEN, MERGED, CLOSED
+	Draft            bool
+	Approved         bool
+	CIPass           bool
+	ChangesRequested bool
+	ReviewRequired   bool
 }
 
 // Client interacts with GitHub via the gh CLI.
@@ -131,16 +132,19 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 		return PRStatus{}
 	}
 
-	status := PRStatus{
-		State: pr.State,
-		Draft: pr.Draft,
+	return PRStatus{
+		State:            pr.State,
+		Draft:            pr.Draft,
+		Approved:         pr.ReviewDecision == "APPROVED",
+		ChangesRequested: pr.ReviewDecision == "CHANGES_REQUESTED",
+		ReviewRequired:   pr.ReviewDecision == "REVIEW_REQUIRED",
 	}
+}
 
-	status.Approved = pr.ReviewDecision == "APPROVED"
-	status.HasPendingReviews = pr.ReviewDecision == "CHANGES_REQUESTED" ||
-		pr.ReviewDecision == "REVIEW_REQUIRED"
-
-	return status
+// OpenInBrowser opens a URL in the default browser using gh browse.
+func (c *Client) OpenInBrowser(url string) error {
+	_, err := runGH("browse", "--url", url)
+	return err
 }
 
 func runGH(args ...string) ([]byte, error) {

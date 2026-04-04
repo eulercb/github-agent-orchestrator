@@ -146,8 +146,12 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 
 	number := fmt.Sprintf("#%-5d", issue.Number)
 	title := issue.Title
-	if len(title) > m.width-30 {
-		title = title[:m.width-33] + "..."
+	maxTitleLen := m.width - 33
+	if maxTitleLen < 0 {
+		maxTitleLen = 0
+	}
+	if len(title) > maxTitleLen {
+		title = title[:maxTitleLen] + "..."
 	}
 
 	var labels []string
@@ -246,7 +250,7 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 
 	// PR info
 	prStr := styles.MutedText.Render("—")
-	if pr, ok := m.prCache[sess.Branch]; ok && pr != nil {
+	if pr, ok := m.prCache[prCacheKey(sess.Repo, sess.Branch)]; ok && pr != nil {
 		prStr = m.renderPRStatus(pr)
 	}
 
@@ -280,7 +284,9 @@ func (m *Model) renderPRStatus(pr *github.PullRequest) string {
 		parts = append(parts, styles.PRDraft.Render(prRef+" draft"))
 	case status.Approved:
 		parts = append(parts, styles.PRApproved.Render(prRef+" ✓ approved"))
-	case status.HasPendingReviews:
+	case status.ChangesRequested:
+		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Warning).Render(prRef+" changes requested"))
+	case status.ReviewRequired:
 		parts = append(parts, styles.PROpen.Render(prRef+" pending review"))
 	default:
 		parts = append(parts, styles.PROpen.Render(prRef+" open"))

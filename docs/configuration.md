@@ -42,11 +42,15 @@ spawn:
   # Default: ""
   repo_dir: ""
 
+  # Base branch for creating worktrees (e.g., "main", "master", "develop").
+  # If empty, gao derives it from origin/HEAD automatically.
+  # Default: "" (auto-detect)
+  base_branch: ""
+
 # How to attach to a running session.
 attach:
   # Shell command template for attaching. {{.Session}} is replaced with the
-  # tmux session name. Only used as a fallback when neither Warp nor the
-  # default tmux attach is suitable.
+  # tmux session name. Used when Warp is not available.
   # Default: "tmux attach-session -t {{.Session}}"
   command: "tmux attach-session -t {{.Session}}"
 

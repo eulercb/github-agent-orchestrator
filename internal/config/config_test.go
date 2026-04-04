@@ -12,7 +12,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Spawn.Command != "claude --dangerously-skip-permissions" {
 		t.Errorf("unexpected default spawn command: %s", cfg.Spawn.Command)
 	}
-	if !cfg.Spawn.UseWorktee {
+	if !cfg.Spawn.UseWorktree {
 		t.Error("expected worktree to be enabled by default")
 	}
 	if cfg.CCUsage.Enabled {
