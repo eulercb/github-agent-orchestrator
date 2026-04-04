@@ -36,12 +36,12 @@ type User struct {
 
 // PullRequest represents a GitHub pull request.
 type PullRequest struct {
-	Number            int        `json:"number"`
-	Title             string     `json:"title"`
-	State             string     `json:"state"`
-	URL               string     `json:"url"`
-	Draft             bool       `json:"isDraft"`
-	HeadRef           string     `json:"headRefName"`
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	State          string `json:"state"`
+	URL            string `json:"url"`
+	Draft          bool   `json:"isDraft"`
+	HeadRef        string `json:"headRefName"`
 	ReviewDecision string `json:"reviewDecision"`
 }
 
