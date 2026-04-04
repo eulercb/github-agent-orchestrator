@@ -56,7 +56,12 @@ func run() error {
 			return fmt.Errorf("config path: %w", pathErr)
 		}
 
-		if _, statErr := os.Stat(cfgPath); os.IsNotExist(statErr) {
+		_, statErr := os.Stat(cfgPath)
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return fmt.Errorf("stat config %s: %w", cfgPath, statErr)
+		}
+
+		if os.IsNotExist(statErr) {
 			// No config file found — run init automatically.
 			fmt.Println("No config found. Let's set one up!")
 			fmt.Println()
@@ -131,7 +136,12 @@ func runInit() {
 	fmt.Printf("\nConfig created at %s\n", cfgPath)
 
 	cfg, loadErr := config.Load()
-	if loadErr == nil && len(cfg.Repos) > 0 {
+	if loadErr != nil {
+		fmt.Fprintf(os.Stderr, "gao: failed to read config after init: %v\n", loadErr)
+		os.Exit(1)
+	}
+
+	if len(cfg.Repos) > 0 {
 		fmt.Println("Run 'gao' to start the dashboard.")
 	} else {
 		fmt.Println("Add a repo to the config, then run 'gao' to start.")
