@@ -38,3 +38,28 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: latest
+
+  build-binaries:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Build snapshot binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --snapshot --clean
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: gao-pr-${{ github.event.number }}
+          path: dist/gao_*
+          retention-days: 7
