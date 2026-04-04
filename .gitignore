@@ -1,0 +1,6 @@
+/build/
+/coverage.out
+/coverage.html
+*.exe
+*.test
+*.prof
