@@ -3,8 +3,12 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -96,17 +100,72 @@ func runInit() {
 		os.Exit(1)
 	}
 
+	scanner := bufio.NewScanner(os.Stdin)
 	cfg := config.DefaultConfig()
-	// Leave repos empty so the user is prompted to configure on first run.
-	cfg.Repos = []config.RepoConfig{}
+
+	// Try to detect the current repo from git remote.
+	detectedOwner, detectedName := detectGitRepo()
+
+	owner := prompt(scanner, "Repository owner", detectedOwner)
+	name := prompt(scanner, "Repository name", detectedName)
+
+	if owner != "" && name != "" {
+		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
+		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
+
+		repo := config.RepoConfig{
+			Owner: owner,
+			Name:  name,
+			Filters: config.IssueFilters{
+				Assignee: assignee,
+				State:    state,
+			},
+		}
+		cfg.Repos = []config.RepoConfig{repo}
+	}
 
 	if err := config.Save(&cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("Config created at %s\n", cfgPath)
-	fmt.Println("Edit it with your repo details, then run 'gao' to start.")
+	fmt.Printf("\nConfig created at %s\n", cfgPath)
+	if len(cfg.Repos) > 0 {
+		fmt.Println("Run 'gao' to start the dashboard.")
+	} else {
+		fmt.Println("Add a repo to the config, then run 'gao' to start.")
+	}
+}
+
+// prompt asks the user for input with an optional default value.
+func prompt(scanner *bufio.Scanner, label, defaultVal string) string {
+	if defaultVal != "" {
+		fmt.Printf("%s [%s]: ", label, defaultVal)
+	} else {
+		fmt.Printf("%s: ", label)
+	}
+	if scanner.Scan() {
+		input := strings.TrimSpace(scanner.Text())
+		if input != "" {
+			return input
+		}
+	}
+	return defaultVal
+}
+
+// detectGitRepo tries to detect the GitHub owner/name from the current
+// directory's git remote.
+func detectGitRepo() (owner, name string) {
+	cmd := exec.CommandContext(context.Background(), "gh", "repo", "view", "--json", "owner,name", "-q", ".owner.login + \"/\" + .name")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "/", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", ""
 }
 
 func printUsage() {
