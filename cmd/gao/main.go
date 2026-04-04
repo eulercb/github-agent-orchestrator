@@ -110,6 +110,9 @@ func runInit() {
 	name := prompt(scanner, "Repository name", detectedName)
 
 	if owner != "" && name != "" {
+		issueOwner := prompt(scanner, "Issue source repo owner (blank to use same repo)", "")
+		issueName := prompt(scanner, "Issue source repo name (blank to use same repo)", "")
+
 		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
 		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
 
@@ -121,6 +124,14 @@ func runInit() {
 				State:    state,
 			},
 		}
+
+		if issueOwner != "" && issueName != "" {
+			repo.IssueSource = &config.IssueSource{
+				Owner: issueOwner,
+				Name:  issueName,
+			}
+		}
+
 		cfg.Repos = []config.RepoConfig{repo}
 	}
 

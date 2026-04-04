@@ -385,7 +385,7 @@ func (m *Model) spawnSession() tea.Cmd {
 	}
 
 	// Check if session already exists for this issue
-	existing := m.sessions.FindByIssue(repo.FullName(), issue.Number)
+	existing := m.sessions.FindByIssue(repo.IssueRepoFullName(), issue.Number)
 	if existing != nil {
 		m.errorMsg = fmt.Sprintf("Session already exists for issue #%d", issue.Number)
 		return nil

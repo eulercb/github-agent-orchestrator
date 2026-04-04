@@ -63,9 +63,12 @@ func NewClient() *Client {
 }
 
 // ListIssues fetches issues for a repo with optional filters.
+// Issues are fetched from the issue source repo if configured,
+// otherwise from the main repo.
 func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
+	issueRepo := repo.IssueRepoFullName()
 	args := []string{"issue", "list",
-		"--repo", repo.FullName(),
+		"--repo", issueRepo,
 		"--json", "number,title,state,url,labels,assignees,body,author",
 		"--limit", "50",
 	}
@@ -82,7 +85,7 @@ func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 
 	out, err := runGH(args...)
 	if err != nil {
-		return nil, fmt.Errorf("list issues for %s: %w", repo.FullName(), err)
+		return nil, fmt.Errorf("list issues for %s: %w", issueRepo, err)
 	}
 
 	var issues []Issue
