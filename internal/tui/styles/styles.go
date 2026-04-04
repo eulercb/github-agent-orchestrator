@@ -78,12 +78,6 @@ var (
 	// PRApproved styles approved PR labels.
 	PRApproved = lipgloss.NewStyle().Foreground(Success).Bold(true)
 
-	// LabelStyle styles issue labels.
-	LabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(Primary).
-			Padding(0, 1)
-
 	// BorderedBox styles bordered containers for help and confirm views.
 	BorderedBox = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

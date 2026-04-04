@@ -162,6 +162,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case prsLoadedMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
+			// Merge successful lookups into existing cache
+			for k, v := range msg.prs {
+				m.prCache[k] = v
+			}
 		} else {
 			m.prCache = msg.prs
 		}
