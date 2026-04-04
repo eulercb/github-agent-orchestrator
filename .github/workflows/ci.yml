@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   test:
@@ -63,3 +64,19 @@ jobs:
           name: gao-pr-${{ github.event.number }}
           path: dist/gao_*
           retention-days: 7
+
+      - name: Comment download link on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: build-artifacts
+          message: |
+            ### 📦 Test binaries
+
+            Built from ${{ github.sha }} — [download artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            | Platform | Archive |
+            |----------|---------|
+            | Linux amd64 | `gao_linux_amd64.tar.gz` |
+            | Linux arm64 | `gao_linux_arm64.tar.gz` |
+            | macOS amd64 | `gao_darwin_amd64.tar.gz` |
+            | macOS arm64 | `gao_darwin_arm64.tar.gz` |
