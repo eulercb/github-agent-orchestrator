@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// cmdTimeout is the default timeout for tmux and pgrep subprocesses.
+const cmdTimeout = 5 * time.Second
 
 // Client wraps tmux CLI interactions.
 type Client struct{}
@@ -79,12 +83,16 @@ func (c *Client) IsProcessRunning(session, pattern string) bool {
 	}
 
 	// Check if any child process matches the pattern
-	cmd := exec.CommandContext(context.Background(), "pgrep", "-P", pid, "-f", pattern)
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pgrep", "-P", pid, "-f", pattern)
 	return cmd.Run() == nil
 }
 
 func run(args ...string) (string, error) {
-	cmd := exec.CommandContext(context.Background(), "tmux", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "tmux", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tmux %s: %s (%w)", args[0], strings.TrimSpace(string(out)), err)

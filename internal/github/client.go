@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
 )
@@ -148,7 +149,9 @@ func (c *Client) OpenInBrowser(url string) error {
 }
 
 func runGH(args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(context.Background(), "gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {

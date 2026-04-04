@@ -364,9 +364,7 @@ func (m *Model) fetchPRs() tea.Cmd {
 				}
 				continue
 			}
-			if pr != nil {
-				prs[prCacheKey(s.Repo, s.Branch)] = pr
-			}
+			prs[prCacheKey(s.Repo, s.Branch)] = pr
 		}
 		return prsLoadedMsg{prs: prs, err: firstErr}
 	}
