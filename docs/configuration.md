@@ -8,7 +8,7 @@ gao is configured via a YAML file at `~/.config/gao/config.yaml`. Run `gao init`
 # gao - GitHub Agent Orchestrator configuration
 # https://github.com/eulercb/github-agent-orchestrator
 
-# Repositories to track. Each entry gets its own issue list.
+# Repositories to track. The TUI currently loads issues from the first entry.
 repos:
   - owner: eulercb
     name: my-project

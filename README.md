@@ -26,7 +26,7 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 
 ## The workflow
 
-1. **See your issues** — gao fetches open issues from your configured repos (filtered by assignee, labels, etc.)
+1. **See your issues** — gao fetches open issues from the first configured repo (filtered by assignee, labels, etc.)
 2. **Spawn an agent** — Press `s` on an issue to create a Claude Code session in a tmux + git worktree
 3. **Monitor progress** — The dashboard auto-refreshes session statuses (working / waiting / done) and tracks PRs by branch
 4. **Jump into a session** — Press `a` to attach (opens a Warp tab if available, or suspends the TUI and runs `tmux attach`)

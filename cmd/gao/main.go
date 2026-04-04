@@ -49,8 +49,12 @@ func run() error {
 	if len(cfg.Repos) == 0 {
 		fmt.Println("No repos configured. Run 'gao init' to set up your config.")
 		fmt.Printf("Config file: ")
-		p, _ := config.Path()
-		fmt.Println(p)
+		p, pathErr := config.Path()
+		if pathErr != nil {
+			fmt.Printf("(unavailable: %v)\n", pathErr)
+		} else {
+			fmt.Println(p)
+		}
 		return nil
 	}
 

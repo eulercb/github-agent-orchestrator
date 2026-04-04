@@ -147,7 +147,9 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	}
 
 	if err := m.tmux.SendKeys(sessionName, fullCmd); err != nil {
-		_ = m.tmux.KillSession(sessionName)
+		if killErr := m.tmux.KillSession(sessionName); killErr != nil {
+			return nil, fmt.Errorf("send spawn command: %w; cleanup tmux session %q: %v", err, sessionName, killErr)
+		}
 		return nil, fmt.Errorf("send spawn command: %w", err)
 	}
 
@@ -183,7 +185,9 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		}
 		m.mu.Unlock()
 		// Best-effort cleanup of the tmux session
-		_ = m.tmux.KillSession(sessionName)
+		if killErr := m.tmux.KillSession(sessionName); killErr != nil {
+			return nil, fmt.Errorf("save state: %w; cleanup tmux session %q: %v", err, sessionName, killErr)
+		}
 		return nil, fmt.Errorf("save state: %w", err)
 	}
 
@@ -237,7 +241,9 @@ func (m *Manager) RemoveSession(id string, killTmux bool) error {
 	}
 
 	if killTmux {
-		_ = m.tmux.KillSession(m.sessions[idx].TmuxSession)
+		if err := m.tmux.KillSession(m.sessions[idx].TmuxSession); err != nil {
+			return fmt.Errorf("kill tmux session %q: %w", m.sessions[idx].TmuxSession, err)
+		}
 	}
 
 	m.sessions = append(m.sessions[:idx], m.sessions[idx+1:]...)
