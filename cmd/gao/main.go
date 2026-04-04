@@ -62,6 +62,12 @@ func run() error {
 		}
 
 		if os.IsNotExist(statErr) {
+			// Non-interactive context (piped stdin, CI): don't block on prompts.
+			if fi, fiErr := os.Stdin.Stat(); fiErr == nil && fi.Mode()&os.ModeCharDevice == 0 {
+				fmt.Fprintf(os.Stderr, "No config found. Run 'gao init' interactively to create one.\n")
+				return nil
+			}
+
 			// No config file found — run init automatically.
 			fmt.Println("No config found. Let's set one up!")
 			fmt.Println()
@@ -129,7 +135,7 @@ func runInit() {
 	}
 
 	if err := doInit(); err != nil {
-		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gao: init: %v\n", err)
 		os.Exit(1)
 	}
 
