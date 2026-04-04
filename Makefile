@@ -1,4 +1,4 @@
-.PHONY: build install test lint fmt clean
+.PHONY: build install test test-cover lint fmt clean all
 
 BINARY_NAME := gao
 BUILD_DIR := ./build

@@ -91,7 +91,10 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 
 	repoDir := m.cfg.Spawn.RepoDir
 	if repoDir == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("determine user home directory: %w", err)
+		}
 		repoDir = filepath.Join(home, repo.Name)
 	}
 
@@ -114,13 +117,20 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	if m.cfg.Spawn.UseWorktree {
 		worktreePath = filepath.Join(repoDir, ".worktrees", branch)
 		worktreeParent := filepath.Dir(worktreePath)
+
+		// Quote the base branch ref when it comes from config (not the $() auto-detect)
+		originRef := "origin/" + baseBranch
+		if m.cfg.Spawn.BaseBranch != "" {
+			originRef = shellQuote("origin/" + baseBranch)
+		}
+
 		fullCmd = fmt.Sprintf(
-			"cd %s && git fetch origin && mkdir -p %s && git worktree add %s -b %s origin/%s && cd %s && %s",
+			"cd %s && git fetch origin && mkdir -p %s && git worktree add %s -b %s %s && cd %s && %s",
 			shellQuote(repoDir),
 			shellQuote(worktreeParent),
 			shellQuote(worktreePath),
 			shellQuote(branch),
-			baseBranch,
+			originRef,
 			shellQuote(worktreePath),
 			spawnCmd,
 		)
@@ -270,8 +280,9 @@ func extractLastActivity(output string) string {
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line != "" {
-			if len(line) > 80 {
-				return line[:80] + "..."
+			runes := []rune(line)
+			if len(runes) > 80 {
+				return string(runes[:80]) + "..."
 			}
 			return line
 		}

@@ -66,7 +66,7 @@ func (c *Client) NewSession(name, workDir, command string) error {
 		args = append(args, "-c", workDir)
 	}
 	if command != "" {
-		args = append(args, command)
+		args = append(args, "--", command)
 	}
 	_, err := run(args...)
 	if err != nil {

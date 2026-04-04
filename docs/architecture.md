@@ -81,7 +81,7 @@ When the user presses `s` on an issue:
 
 1. `model.spawnSession()` validates selection, checks for duplicate sessions
 2. `claude.Manager.SpawnSession()`:
-   - Generates session name: `gao-{repoName}-{issueNumber}`
+   - Generates session name: `gao-{owner}-{repoName}-{issueNumber}`
    - Generates branch name: `claude/issue-{issueNumber}`
    - Creates a detached tmux session (`tmux new-session -d`)
    - Sends the spawn command via `tmux send-keys` (worktree setup + claude command)
@@ -118,7 +118,7 @@ For each session with a branch:
   gh pr list --repo {repo} --head {branch} --limit 1
 ```
 
-The result is cached in `model.prCache` (map from branch name to `*PullRequest`). The cache is refreshed every 10 seconds alongside the tick.
+The result is cached in `model.prCache` (map from `repo:branch` composite key to `*PullRequest`). The cache is refreshed every 10 seconds alongside the tick.
 
 ### Attach flow
 
@@ -144,11 +144,10 @@ All external tools are called via `exec.Command`. There are no Go libraries wrap
 
 | Tool | Interface | Error handling |
 |------|-----------|----------------|
-| `gh` | JSON output (`--json` flag) parsed into Go structs | Stderr from exit errors surfaced to user |
+| `gh` | JSON output (`--json` flag) parsed into Go structs; `browse --url` for opening URLs in the browser | Stderr from exit errors surfaced to user |
 | `tmux` | Format strings (`-F`) for structured output | "no server running" / "no sessions" treated as empty, not error |
 | `pgrep` | Exit code only (0 = found, non-zero = not found) | Silent failure returns false |
 | `warp-cli` | `exec.LookPath` for detection, `open-tab` subcommand | Falls back to tmux attach |
-| `open`/`xdg-open` | URL as argument | Tries `open` first (macOS), then `xdg-open` (Linux) |
 
 ## Design decisions
 

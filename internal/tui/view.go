@@ -41,7 +41,7 @@ func (m *Model) viewDashboard() string {
 	}
 
 	// Calculate space for content
-	contentHeight := m.height - 4 // title + status + help + error
+	contentHeight := m.height - 3 // title + status + help
 	if m.errorMsg != "" {
 		contentHeight--
 	}
