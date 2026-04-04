@@ -19,8 +19,8 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 |  #43  claude/issue-43   + done       PR #51 approved               |
 |  #44  claude/issue-44   ~ waiting    --                            |
 +--------------------------------------------------------------------+
-|  Sessions: 3   * 1 working   ~ 1 waiting   + 1 done                |
-|  j/k navigate  tab switch  s spawn  a attach  o open  ? help  q quit|
+|  Sessions: 3  * 1 working  ~ 1 waiting  + 1 done                   |
+|  j/k nav  tab switch  s spawn  a attach  o open  ? help  q quit    |
 +--------------------------------------------------------------------+
 ```
 
