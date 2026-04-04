@@ -283,6 +283,8 @@ func (m *Model) renderPRStatus(pr *github.PullRequest) string {
 	switch {
 	case status.State == "MERGED":
 		parts = append(parts, styles.PRMerged.Render(prRef+" merged"))
+	case status.State == "CLOSED":
+		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(prRef+" closed"))
 	case status.Draft:
 		parts = append(parts, styles.PRDraft.Render(prRef+" draft"))
 	case status.Approved:
