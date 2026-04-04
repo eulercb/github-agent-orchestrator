@@ -82,8 +82,7 @@ type StatusBar struct {
 
 // AttachConfig controls how sessions are attached.
 type AttachConfig struct {
-	Command string `yaml:"command"`
-	UseWarp *bool  `yaml:"use_warp"`
+	UseWarp *bool `yaml:"use_warp"`
 }
 
 // CCUsageConfig configures optional ccusage integration.
@@ -104,9 +103,7 @@ func DefaultConfig() Config {
 		StatusBar: StatusBar{
 			Command: "",
 		},
-		Attach: AttachConfig{
-			Command: "tmux attach-session -t {{.SessionQuoted}}",
-		},
+		Attach: AttachConfig{},
 		CCUsage: CCUsageConfig{
 			Enabled: false,
 			Command: "ccusage",

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -407,7 +406,11 @@ func (m *Model) attachSession() tea.Cmd {
 		return nil
 	}
 
-	sessionName := sess.TmuxSession
+	workDir := sess.WorktreePath
+	spawnCmd := m.cfg.Spawn.Command
+	if spawnCmd == "" {
+		spawnCmd = "claude --dangerously-skip-permissions"
+	}
 
 	// Check if Warp is available and configured
 	useWarp := false
@@ -421,7 +424,9 @@ func (m *Model) attachSession() tea.Cmd {
 
 	if useWarp {
 		return func() tea.Msg {
-			cmd := exec.CommandContext(context.Background(), "warp-cli", "open-tab", "--", "tmux", "attach-session", "-t", sessionName)
+			cmd := exec.CommandContext(context.Background(),
+				"warp-cli", "open-tab", "--",
+				"sh", "-c", "cd "+shellQuoteSession(workDir)+" && "+spawnCmd)
 			if err := cmd.Run(); err != nil {
 				return errMsg{err: fmt.Errorf("warp attach: %w", err)}
 			}
@@ -429,8 +434,8 @@ func (m *Model) attachSession() tea.Cmd {
 		}
 	}
 
-	// Use the configurable attach command template, falling back to tmux attach
-	attachCmd := m.resolveAttachCommand(sessionName)
+	// Use configurable attach command or default to spawn command in worktree
+	attachCmd := m.resolveAttachCommand(workDir)
 
 	return tea.ExecProcess(
 		exec.CommandContext(context.Background(), "sh", "-c", attachCmd),
@@ -443,30 +448,13 @@ func (m *Model) attachSession() tea.Cmd {
 	)
 }
 
-// resolveAttachCommand applies the session name to the attach command template.
-func (m *Model) resolveAttachCommand(sessionName string) string {
-	cmdTmpl := m.cfg.Attach.Command
-	if cmdTmpl == "" {
-		cmdTmpl = "tmux attach-session -t {{.SessionQuoted}}"
+// resolveAttachCommand builds the attach command for a session's worktree directory.
+func (m *Model) resolveAttachCommand(workDir string) string {
+	spawnCmd := m.cfg.Spawn.Command
+	if spawnCmd == "" {
+		spawnCmd = "claude --dangerously-skip-permissions"
 	}
-
-	tmpl, err := template.New("attach").Parse(cmdTmpl)
-	if err != nil {
-		return "tmux attach-session -t " + shellQuoteSession(sessionName)
-	}
-
-	var buf strings.Builder
-	data := struct {
-		Session       string
-		SessionQuoted string
-	}{
-		Session:       sessionName,
-		SessionQuoted: shellQuoteSession(sessionName),
-	}
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "tmux attach-session -t " + shellQuoteSession(sessionName)
-	}
-	return buf.String()
+	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
 }
 
 func (m *Model) openInBrowser() tea.Cmd {
@@ -562,7 +550,7 @@ func (m *Model) refreshStatusBar() tea.Cmd {
 	}
 }
 
-// shellQuoteSession wraps a session name in single quotes for safe shell interpolation.
+// shellQuoteSession wraps a string in single quotes for safe shell interpolation.
 func shellQuoteSession(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

@@ -4,7 +4,7 @@ This file provides context for Claude Code sessions working on gao (GitHub Agent
 
 ## What is gao
 
-A Go CLI with a Bubble Tea TUI for managing Claude Code agent sessions alongside GitHub issues and PRs. The workflow: view issues, spawn Claude Code in tmux worktrees, monitor status, track PRs, attach to sessions.
+A Go CLI with a Bubble Tea TUI for managing Claude Code agent sessions alongside GitHub issues and PRs. The workflow: view issues, spawn Claude Code as background processes in worktrees, monitor status via log files, track PRs, attach to sessions.
 
 ## Quick reference
 
@@ -21,7 +21,7 @@ go run ./cmd/gao  # run locally
 cmd/gao/main.go           Entry point, subcommands (version, init, help)
 internal/config/           YAML config at ~/.config/gao/config.yaml
 internal/github/           gh CLI wrapper (issues, PRs, browser open)
-internal/tmux/             tmux session management
+internal/process/          Background process management (start, monitor, kill, log capture)
 internal/claude/           Session lifecycle, spawn, status detection
 internal/statusbar/        Pluggable status bar (shell command or fallback)
 internal/tui/              Bubble Tea model, view, keymap, styles

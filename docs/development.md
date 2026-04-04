@@ -24,7 +24,7 @@ make clean        # Remove build artifacts
 cmd/gao/           CLI entry point
 internal/config/   Configuration (YAML loading, defaults)
 internal/github/   GitHub integration (gh CLI wrapper)
-internal/tmux/     tmux session management
+internal/process/  Background process management
 internal/claude/   Claude Code session lifecycle
 internal/statusbar/ Customizable status bar
 internal/tui/      Bubble Tea terminal UI
@@ -72,7 +72,7 @@ make test-cover
 open coverage.html
 ```
 
-Tests avoid external dependencies (no `gh`, `tmux`, or network calls in unit tests). The `config` tests use `t.TempDir()` and `t.Setenv("XDG_CONFIG_HOME", ...)` for isolation. The `claude` tests cover helper functions (status parsing, shell quoting). The `statusbar` tests use simple shell commands (`echo`, `false`).
+Tests avoid external dependencies (no `gh` or network calls in unit tests). The `config` tests use `t.TempDir()` and `t.Setenv("XDG_CONFIG_HOME", ...)` for isolation. The `claude` tests cover helper functions (status parsing). The `statusbar` tests use simple shell commands (`echo`, `false`).
 
 ## Linting
 

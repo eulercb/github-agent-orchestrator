@@ -94,21 +94,3 @@ func TestIsWaitingForInput(t *testing.T) {
 		})
 	}
 }
-
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		input  string
-		expect string
-	}{
-		{"simple", "'simple'"},
-		{"with space", "'with space'"},
-		{"it's", "'it'\"'\"'s'"},
-	}
-
-	for _, tt := range tests {
-		got := shellQuote(tt.input)
-		if got != tt.expect {
-			t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.expect)
-		}
-	}
-}

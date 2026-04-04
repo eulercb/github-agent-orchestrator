@@ -2,8 +2,10 @@
 package claude
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -12,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
-	"github.com/eulercb/github-agent-orchestrator/internal/tmux"
+	"github.com/eulercb/github-agent-orchestrator/internal/process"
 )
 
 // Status represents the current state of a Claude Code session.
@@ -26,6 +28,9 @@ const (
 	StatusStopped Status = "stopped"
 )
 
+// gitTimeout is the default timeout for git subprocesses.
+const gitTimeout = 60 * time.Second
+
 // Session tracks a Claude Code agent session.
 type Session struct {
 	ID           string    `yaml:"id"`
@@ -34,7 +39,8 @@ type Session struct {
 	Repo         string    `yaml:"repo"`
 	IssueRepo    string    `yaml:"issue_repo,omitempty"`
 	Branch       string    `yaml:"branch"`
-	TmuxSession  string    `yaml:"tmux_session"`
+	PID          int       `yaml:"pid"`
+	LogFile      string    `yaml:"log_file"`
 	WorktreePath string    `yaml:"worktree_path"`
 	CreatedAt    time.Time `yaml:"created_at"`
 	Status       Status    `yaml:"status"`
@@ -53,14 +59,13 @@ func (s *Session) IssueRepoName() string {
 // Manager handles the lifecycle of Claude Code sessions.
 type Manager struct {
 	cfg       *config.Config
-	tmux      *tmux.Client
 	sessions  []Session
 	mu        sync.RWMutex
 	stateFile string
 }
 
 // NewManager creates a session manager.
-func NewManager(cfg *config.Config, tmuxClient *tmux.Client) (*Manager, error) {
+func NewManager(cfg *config.Config) (*Manager, error) {
 	stateFile, err := config.SessionsPath(cfg.SessionDir)
 	if err != nil {
 		return nil, err
@@ -68,7 +73,6 @@ func NewManager(cfg *config.Config, tmuxClient *tmux.Client) (*Manager, error) {
 
 	m := &Manager{
 		cfg:       cfg,
-		tmux:      tmuxClient,
 		stateFile: stateFile,
 	}
 
@@ -104,9 +108,14 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	}
 
 	// Check if session already exists
-	if m.tmux.SessionExists(sessionName) {
-		return nil, fmt.Errorf("session %q already exists", sessionName)
+	m.mu.RLock()
+	for i := range m.sessions {
+		if m.sessions[i].ID == sessionName {
+			m.mu.RUnlock()
+			return nil, fmt.Errorf("session %q already exists", sessionName)
+		}
 	}
+	m.mu.RUnlock()
 
 	repoDir := m.cfg.Spawn.RepoDir
 	if repoDir == "" {
@@ -117,60 +126,38 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		repoDir = filepath.Join(home, repo.Name)
 	}
 
-	// Build the command to run inside tmux
+	// Set up git worktree or branch
+	var workDir string
+	if m.cfg.Spawn.UseWorktree {
+		worktreePath := filepath.Join(repoDir, ".worktrees", branch)
+		if err := m.setupWorktree(repoDir, worktreePath, branch); err != nil {
+			return nil, fmt.Errorf("setup worktree: %w", err)
+		}
+		workDir = worktreePath
+	} else {
+		if err := m.setupBranch(repoDir, branch); err != nil {
+			return nil, fmt.Errorf("setup branch: %w", err)
+		}
+		workDir = repoDir
+	}
+
+	// Determine log file path
+	logDir, err := config.Dir()
+	if err != nil {
+		return nil, fmt.Errorf("determine log directory: %w", err)
+	}
+	logFile := filepath.Join(logDir, "logs", sessionName+".log")
+
+	// Parse spawn command
 	spawnCmd := m.cfg.Spawn.Command
 	if spawnCmd == "" {
 		spawnCmd = "claude --dangerously-skip-permissions"
 	}
 
-	// Determine base branch for worktree
-	baseBranch := m.cfg.Spawn.BaseBranch
-	if baseBranch == "" {
-		// Use symbolic ref to derive the default branch
-		baseBranch = "$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo main)"
-	}
-
-	// Compose the full command: optionally create worktree, then run claude
-	var fullCmd string
-	var worktreePath string
-	if m.cfg.Spawn.UseWorktree {
-		worktreePath = filepath.Join(repoDir, ".worktrees", branch)
-		worktreeParent := filepath.Dir(worktreePath)
-
-		// Quote the base branch ref when it comes from config (not the $() auto-detect)
-		originRef := "origin/" + baseBranch
-		if m.cfg.Spawn.BaseBranch != "" {
-			originRef = shellQuote("origin/" + baseBranch)
-		}
-
-		fullCmd = fmt.Sprintf(
-			"cd %s && git fetch origin && mkdir -p %s && git worktree add %s -b %s %s && cd %s && %s",
-			shellQuote(repoDir),
-			shellQuote(worktreeParent),
-			shellQuote(worktreePath),
-			shellQuote(branch),
-			originRef,
-			shellQuote(worktreePath),
-			spawnCmd,
-		)
-	} else {
-		fullCmd = fmt.Sprintf("cd %s && (git checkout %s || git checkout -b %s) && %s",
-			shellQuote(repoDir),
-			shellQuote(branch),
-			shellQuote(branch),
-			spawnCmd,
-		)
-	}
-
-	if err := m.tmux.NewSession(sessionName, "", ""); err != nil {
-		return nil, fmt.Errorf("create tmux session: %w", err)
-	}
-
-	if err := m.tmux.SendKeys(sessionName, fullCmd); err != nil {
-		if killErr := m.tmux.KillSession(sessionName); killErr != nil {
-			return nil, fmt.Errorf("send spawn command: %w; cleanup tmux session %q: %v", err, sessionName, killErr)
-		}
-		return nil, fmt.Errorf("send spawn command: %w", err)
+	// Start the process in the background
+	pid, err := process.StartBackground(workDir, logFile, "sh", "-c", spawnCmd)
+	if err != nil {
+		return nil, fmt.Errorf("start claude process: %w", err)
 	}
 
 	issueRepo := repo.IssueRepoFullName()
@@ -181,15 +168,11 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		Repo:         repo.FullName(),
 		IssueRepo:    issueRepo,
 		Branch:       branch,
-		TmuxSession:  sessionName,
-		WorktreePath: worktreePath,
+		PID:          pid,
+		LogFile:      logFile,
+		WorktreePath: workDir,
 		CreatedAt:    time.Now(),
 		Status:       StatusRunning,
-	}
-
-	// When not using worktrees, set WorktreePath to the repo dir
-	if !m.cfg.Spawn.UseWorktree {
-		sess.WorktreePath = repoDir
 	}
 
 	m.mu.Lock()
@@ -197,7 +180,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	m.mu.Unlock()
 
 	if err := m.saveState(); err != nil {
-		// Rollback: remove the session from in-memory state
+		// Rollback: remove the session from in-memory state and kill the process
 		m.mu.Lock()
 		for i := len(m.sessions) - 1; i >= 0; i-- {
 			if m.sessions[i].ID == sess.ID {
@@ -206,9 +189,8 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 			}
 		}
 		m.mu.Unlock()
-		// Best-effort cleanup of the tmux session
-		if killErr := m.tmux.KillSession(sessionName); killErr != nil {
-			return nil, fmt.Errorf("save state: %w; cleanup tmux session %q: %v", err, sessionName, killErr)
+		if killErr := process.Kill(pid); killErr != nil {
+			return nil, fmt.Errorf("save state: %w; cleanup process %d: %v", err, pid, killErr)
 		}
 		return nil, fmt.Errorf("save state: %w", err)
 	}
@@ -216,7 +198,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	return &sess, nil
 }
 
-// RefreshStatuses updates the status of all sessions by checking tmux.
+// RefreshStatuses updates the status of all sessions by checking processes.
 func (m *Manager) RefreshStatuses() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -224,19 +206,21 @@ func (m *Manager) RefreshStatuses() {
 	for i := range m.sessions {
 		s := &m.sessions[i]
 
-		if !m.tmux.SessionExists(s.TmuxSession) {
-			s.Status = StatusStopped
+		if !process.IsRunning(s.PID) {
+			if s.Status == StatusRunning || s.Status == StatusWaiting {
+				s.Status = StatusDone
+			} else if s.Status != StatusDone {
+				s.Status = StatusStopped
+			}
 			continue
 		}
 
-		claudeRunning := m.tmux.IsProcessRunning(s.TmuxSession, "claude")
-		if !claudeRunning {
-			s.Status = StatusDone
-		} else {
-			s.Status = StatusRunning
-			// Try to detect waiting state from pane output
-			output, err := m.tmux.CapturePaneOutput(s.TmuxSession, 5)
-			if err == nil {
+		s.Status = StatusRunning
+
+		// Try to detect waiting state from log output
+		if s.LogFile != "" {
+			output, err := process.ReadLastLines(s.LogFile, 5)
+			if err == nil && output != "" {
 				s.LastActivity = extractLastActivity(output)
 				if isWaitingForInput(output) {
 					s.Status = StatusWaiting
@@ -246,8 +230,8 @@ func (m *Manager) RefreshStatuses() {
 	}
 }
 
-// RemoveSession removes a session from tracking and optionally kills the tmux session.
-func (m *Manager) RemoveSession(id string, killTmux bool) error {
+// RemoveSession removes a session from tracking and optionally kills the process.
+func (m *Manager) RemoveSession(id string, killProcess bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -262,9 +246,9 @@ func (m *Manager) RemoveSession(id string, killTmux bool) error {
 		return fmt.Errorf("session %q not found", id)
 	}
 
-	if killTmux {
-		if err := m.tmux.KillSession(m.sessions[idx].TmuxSession); err != nil {
-			return fmt.Errorf("kill tmux session %q: %w", m.sessions[idx].TmuxSession, err)
+	if killProcess && process.IsRunning(m.sessions[idx].PID) {
+		if err := process.Kill(m.sessions[idx].PID); err != nil {
+			return fmt.Errorf("kill process for session %q: %w", id, err)
 		}
 	}
 
@@ -285,6 +269,64 @@ func (m *Manager) FindByIssue(issueRepo string, issueNumber int) *Session {
 			return &sess
 		}
 	}
+	return nil
+}
+
+func (m *Manager) setupWorktree(repoDir, worktreePath, branch string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+
+	// git fetch origin
+	cmd := exec.CommandContext(ctx, "git", "fetch", "origin")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git fetch: %s (%w)", strings.TrimSpace(string(out)), err)
+	}
+
+	// Determine base branch
+	baseBranch := m.cfg.Spawn.BaseBranch
+	if baseBranch == "" {
+		refCmd := exec.CommandContext(ctx, "git", "symbolic-ref", "refs/remotes/origin/HEAD")
+		refCmd.Dir = repoDir
+		out, err := refCmd.Output()
+		if err != nil {
+			baseBranch = "main"
+		} else {
+			baseBranch = strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/remotes/origin/")
+		}
+	}
+
+	// Create worktree parent directory
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o750); err != nil {
+		return fmt.Errorf("create worktree parent: %w", err)
+	}
+
+	// git worktree add
+	wtCmd := exec.CommandContext(ctx, "git", "worktree", "add", worktreePath, "-b", branch, "origin/"+baseBranch)
+	wtCmd.Dir = repoDir
+	if out, err := wtCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add: %s (%w)", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
+func (m *Manager) setupBranch(repoDir, branch string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+
+	// Try checking out existing branch first
+	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		// Branch doesn't exist, create it
+		createCmd := exec.CommandContext(ctx, "git", "checkout", "-b", branch)
+		createCmd.Dir = repoDir
+		if out, err := createCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git checkout -b %s: %s (%w)", branch, strings.TrimSpace(string(out)), err)
+		}
+	}
+
 	return nil
 }
 
@@ -365,8 +407,4 @@ func isWaitingForInput(output string) bool {
 	}
 
 	return false
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

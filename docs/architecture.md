@@ -12,8 +12,8 @@ internal/
 │   └── config_test.go          Config round-trip and default tests
 ├── github/
 │   └── client.go               gh CLI wrapper (issues, PRs, browser open)
-├── tmux/
-│   └── tmux.go                 tmux session management (create, list, attach, capture, kill)
+├── process/
+│   └── process.go              Background process management (start, monitor, kill, log capture)
 ├── claude/
 │   ├── session.go              Session lifecycle, state machine, spawn logic
 │   └── session_test.go         Unit tests for status detection helpers
@@ -23,7 +23,7 @@ internal/
 └── tui/
     ├── model.go                Bubble Tea model, Init/Update, all tea.Cmd producers
     ├── view.go                 All View() rendering (dashboard, help, confirm)
-    ├── keymap.go               Key bindings (kept minimal to avoid tmux conflicts)
+    ├── keymap.go               Key bindings
     └── styles/
         └── styles.go           Lipgloss color palette and component styles
 ```
@@ -37,7 +37,7 @@ cmd/gao
        ├── github
        ├── claude
        │    ├── config
-       │    └── tmux
+       │    └── process
        └── styles
 ```
 
@@ -51,7 +51,6 @@ No circular dependencies. Each `internal/` package has a single responsibility. 
 main.go
   → config.Load()            reads ~/.config/gao/config.yaml
   → github.NewClient()       stateless, wraps gh CLI
-  → tmux.NewClient()         stateless, wraps tmux CLI
   → claude.NewManager()      loads sessions.yaml, holds session state
   → tui.NewModel()           wires everything into the Bubble Tea model
   → tea.NewProgram().Run()   enters the TUI event loop
@@ -83,9 +82,10 @@ When the user presses `s` on an issue:
 2. `claude.Manager.SpawnSession()`:
    - Generates session name: `gao-{owner}-{repoName}-{issueNumber}`
    - Generates branch name: `claude/issue-{issueNumber}`
-   - Creates a detached tmux session (`tmux new-session -d`)
-   - Sends the spawn command via `tmux send-keys` (worktree setup + claude command)
-   - Persists session to `sessions.yaml`
+   - Sets up the git worktree (or branch checkout) synchronously
+   - Starts the Claude process in the background via `process.StartBackground()`
+   - Output is captured to a log file in `~/.config/gao/logs/`
+   - Persists session (with PID and log path) to `sessions.yaml`
 3. UI switches to Sessions panel
 
 ### Session status detection
@@ -94,13 +94,11 @@ When the user presses `s` on an issue:
 
 ```
 For each tracked session:
-  1. tmux session exists?
-     NO  → StatusStopped
-     YES → Is "claude" process running? (pgrep -P {panePid} -f claude)
-           NO  → StatusDone
-           YES → Capture last 5 lines of pane output
-                 Contains waiting indicators? → StatusWaiting
-                 Otherwise                    → StatusRunning
+  1. Is the PID still running? (signal 0 check)
+     NO  → StatusDone (or StatusStopped if previously stopped)
+     YES → Read last 5 lines of log file
+           Contains waiting indicators? → StatusWaiting
+           Otherwise                    → StatusRunning
 ```
 
 Waiting indicators (checked against the last line, case-insensitive):
@@ -124,8 +122,8 @@ The result is cached in `model.prCache` (map from `repo:branch` composite key to
 
 When the user presses `a` on a session:
 
-- **Warp available**: Runs `warp-cli open-tab -- tmux attach-session -t {session}` (non-blocking, TUI stays running)
-- **No Warp**: Uses `tea.ExecProcess` to suspend the TUI, runs `tmux attach-session`, resumes TUI on detach
+- **Warp available**: Runs `warp-cli open-tab -- sh -c 'cd <worktree> && <spawn_command>'` (non-blocking, TUI stays running)
+- **No Warp**: Uses `tea.ExecProcess` to suspend the TUI, runs an interactive Claude session in the worktree directory, resumes TUI on exit
 
 ## State persistence
 
@@ -133,10 +131,11 @@ When the user presses `a` on a session:
 |------|--------|------------|
 | `~/.config/gao/config.yaml` | YAML | User (hand-edited) |
 | `~/.config/gao/sessions.yaml` | YAML | `claude.Manager` (read/write on spawn, remove, load) |
+| `~/.config/gao/logs/<session>.log` | Text | `process.StartBackground` (stdout/stderr capture) |
 
 The `sessions.yaml` file is the source of truth for tracked sessions. It stores:
-- Session ID, issue number/title, repo, branch, tmux session name
-- Worktree path, creation time, last known status, last activity snippet
+- Session ID, issue number/title, repo, branch, PID
+- Log file path, worktree path, creation time, last known status, last activity snippet
 
 ## External tool interfaces
 
@@ -145,20 +144,20 @@ All external tools are called via `exec.Command`. There are no Go libraries wrap
 | Tool | Interface | Error handling |
 |------|-----------|----------------|
 | `gh` | JSON output (`--json` flag) parsed into Go structs; `browse --url` for opening URLs in the browser | Stderr from exit errors surfaced to user |
-| `tmux` | Format strings (`-F`) for structured output | "no server running" / "no sessions" treated as empty, not error |
-| `pgrep` | Exit code only (0 = found, non-zero = not found) | Silent failure returns false |
-| `warp-cli` | `exec.LookPath` for detection, `open-tab` subcommand | Falls back to tmux attach |
+| `git` | Direct exec for fetch, worktree, checkout operations | Combined output surfaced in error messages |
+| `pgrep` | Not used (replaced by direct PID monitoring via signal 0) | N/A |
+| `warp-cli` | `exec.LookPath` for detection, `open-tab` subcommand | Falls back to interactive attach via `tea.ExecProcess` |
 
 ## Design decisions
 
 **Why shell out to `gh` instead of using the GitHub API directly?**
 The user already has `gh` authenticated. No need to manage OAuth tokens or PATs. The JSON output mode makes parsing straightforward.
 
-**Why tmux instead of managing processes directly?**
-tmux provides session persistence, detach/attach, and pane capture for free. It's the standard tool for this use case and the user's existing workflow already relies on it.
+**Why direct process management instead of tmux?**
+Spawning Claude Code as a background process with log file capture removes an external dependency, simplifies the architecture, and improves portability. Status detection reads from log files instead of tmux pane capture. The user can attach to a session by launching an interactive Claude instance in the worktree directory.
 
 **Why a flat keymap instead of modes/menus?**
-The user explicitly wanted minimal keyboard shortcuts to avoid conflicts with tmux. A single-layer keymap with obvious keys (`s` spawn, `a` attach, `o` open) is faster than nested menus.
+The user explicitly wanted minimal keyboard shortcuts. A single-layer keymap with obvious keys (`s` spawn, `a` attach, `o` open) is faster than nested menus.
 
 **Why YAML for config?**
 It's human-friendly, supports comments, and is the de facto standard for CLI tool configs in this ecosystem (gh, docker-compose, etc.).
