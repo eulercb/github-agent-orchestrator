@@ -52,25 +52,6 @@ func (p *Provider) Refresh() {
 	p.mu.Unlock()
 }
 
-// StartAutoRefresh refreshes the status bar periodically.
-func (p *Provider) StartAutoRefresh(ctx context.Context, interval time.Duration) {
-	p.Refresh()
-
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				p.Refresh()
-			}
-		}
-	}()
-}
-
 func (p *Provider) runCommand() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

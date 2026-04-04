@@ -243,8 +243,9 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 
 	issueRef := fmt.Sprintf("#%-5d", sess.IssueNumber)
 	branchShort := sess.Branch
-	if len(branchShort) > 25 {
-		branchShort = branchShort[:22] + "..."
+	branchRunes := []rune(branchShort)
+	if len(branchRunes) > 25 {
+		branchShort = string(branchRunes[:22]) + "..."
 	}
 
 	statusStr := statusStyle.Render(fmt.Sprintf("%s %s", statusIcon, statusText))
@@ -260,8 +261,9 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	// Add last activity
 	if sess.LastActivity != "" && !selected {
 		activitySnippet := sess.LastActivity
-		if len(activitySnippet) > 40 {
-			activitySnippet = activitySnippet[:37] + "..."
+		activityRunes := []rune(activitySnippet)
+		if len(activityRunes) > 40 {
+			activitySnippet = string(activityRunes[:37]) + "..."
 		}
 		content += styles.MutedText.Render("  " + activitySnippet)
 	}
@@ -346,7 +348,7 @@ func (m *Model) viewHelp() string {
 }
 
 func (m *Model) viewConfirm() string {
-	content := fmt.Sprintf("\n  %s\n\n  Press y to confirm, n to cancel.\n", m.confirmMsg)
+	content := fmt.Sprintf("\n  %s\n\n  Press y or Enter to confirm, n to cancel.\n", m.confirmMsg)
 	width := m.width - 4
 	if width < 0 {
 		width = 0

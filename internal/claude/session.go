@@ -23,7 +23,6 @@ const (
 	StatusRunning Status = "working"
 	StatusWaiting Status = "waiting"
 	StatusDone    Status = "done"
-	StatusUnknown Status = "unknown"
 	StatusStopped Status = "stopped"
 )
 
