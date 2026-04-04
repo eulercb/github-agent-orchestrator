@@ -12,7 +12,7 @@ import (
 )
 
 // View renders the TUI.
-func (m Model) View() string {
+func (m Model) View() string { //nolint:gocritic // tea.Model interface requires value receiver
 	if m.width == 0 {
 		return "Loading..."
 	}
@@ -27,7 +27,7 @@ func (m Model) View() string {
 	}
 }
 
-func (m Model) viewDashboard() string {
+func (m *Model) viewDashboard() string {
 	var sections []string
 
 	// Title bar
@@ -68,7 +68,7 @@ func (m Model) viewDashboard() string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-func (m Model) renderTitleBar() string {
+func (m *Model) renderTitleBar() string {
 	repoName := "(no repo configured)"
 	if repo := m.currentRepo(); repo != nil {
 		repoName = repo.FullName()
@@ -84,7 +84,7 @@ func (m Model) renderTitleBar() string {
 	return left + mid + right
 }
 
-func (m Model) renderIssuesPanel(maxHeight int) string {
+func (m *Model) renderIssuesPanel(maxHeight int) string {
 	panelActive := m.activePanel == PanelIssues
 
 	titleStyle := styles.SectionTitle
@@ -120,17 +120,16 @@ func (m Model) renderIssuesPanel(maxHeight int) string {
 	}
 
 	for i := start; i < end; i++ {
-		issue := m.issues[i]
 		selected := panelActive && i == m.issuesCursor
 
-		line := m.renderIssueLine(issue, selected)
+		line := m.renderIssueLine(&m.issues[i], selected)
 		lines = append(lines, line)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m Model) renderIssueLine(issue github.Issue, selected bool) string {
+func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 	// Check if there's an active session for this issue
 	repo := m.currentRepo()
 	hasSession := false
@@ -168,7 +167,7 @@ func (m Model) renderIssueLine(issue github.Issue, selected bool) string {
 	return styles.NormalItem.Render(content)
 }
 
-func (m Model) renderSessionsPanel(maxHeight int) string {
+func (m *Model) renderSessionsPanel(maxHeight int) string {
 	panelActive := m.activePanel == PanelSessions
 
 	titleStyle := styles.SectionTitle
@@ -201,17 +200,16 @@ func (m Model) renderSessionsPanel(maxHeight int) string {
 	}
 
 	for i := start; i < end; i++ {
-		sess := sessions[i]
 		selected := panelActive && i == m.sessionCursor
 
-		line := m.renderSessionLine(sess, selected)
+		line := m.renderSessionLine(&sessions[i], selected)
 		lines = append(lines, line)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m Model) renderSessionLine(sess claude.Session, selected bool) string {
+func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	// Status icon and text
 	var statusIcon, statusText string
 	var statusStyle lipgloss.Style
@@ -269,7 +267,7 @@ func (m Model) renderSessionLine(sess claude.Session, selected bool) string {
 	return styles.NormalItem.Render(content)
 }
 
-func (m Model) renderPRStatus(pr *github.PullRequest) string {
+func (m *Model) renderPRStatus(pr *github.PullRequest) string {
 	status := m.gh.GetPRStatus(pr)
 
 	var parts []string
@@ -291,7 +289,7 @@ func (m Model) renderPRStatus(pr *github.PullRequest) string {
 	return strings.Join(parts, " ")
 }
 
-func (m Model) renderStatusBar() string {
+func (m *Model) renderStatusBar() string {
 	text := m.statusBarText
 	if text == "" {
 		text = "Ready"
@@ -299,7 +297,7 @@ func (m Model) renderStatusBar() string {
 	return styles.StatusBar.Width(m.width).Render(text)
 }
 
-func (m Model) renderHelpBar() string {
+func (m *Model) renderHelpBar() string {
 	var items []string
 	if m.activePanel == PanelIssues {
 		items = []string{"↑↓ navigate", "tab switch", "s spawn", "o open", "r refresh", "? help", "q quit"}
@@ -309,7 +307,7 @@ func (m Model) renderHelpBar() string {
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
 
-func (m Model) viewHelp() string {
+func (m *Model) viewHelp() string {
 	help := `
   gao - GitHub Agent Orchestrator
 
@@ -336,7 +334,7 @@ func (m Model) viewHelp() string {
 	return styles.BorderedBox.Width(m.width - 4).Render(help)
 }
 
-func (m Model) viewConfirm() string {
+func (m *Model) viewConfirm() string {
 	content := fmt.Sprintf("\n  %s\n\n  Press y to confirm, n to cancel.\n", m.confirmMsg)
 	return styles.BorderedBox.Width(m.width - 4).Render(content)
 }

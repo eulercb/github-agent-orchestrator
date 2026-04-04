@@ -18,12 +18,13 @@ import (
 // Status represents the current state of a Claude Code session.
 type Status string
 
+// Session status constants.
 const (
-	StatusRunning  Status = "working"
-	StatusWaiting  Status = "waiting"
-	StatusDone     Status = "done"
-	StatusUnknown  Status = "unknown"
-	StatusStopped  Status = "stopped"
+	StatusRunning Status = "working"
+	StatusWaiting Status = "waiting"
+	StatusDone    Status = "done"
+	StatusUnknown Status = "unknown"
+	StatusStopped Status = "stopped"
 )
 
 // Session tracks a Claude Code agent session.
@@ -42,7 +43,7 @@ type Session struct {
 
 // Manager handles the lifecycle of Claude Code sessions.
 type Manager struct {
-	cfg       config.Config
+	cfg       *config.Config
 	tmux      *tmux.Client
 	sessions  []Session
 	mu        sync.RWMutex
@@ -50,7 +51,7 @@ type Manager struct {
 }
 
 // NewManager creates a session manager.
-func NewManager(cfg config.Config, tmuxClient *tmux.Client) (*Manager, error) {
+func NewManager(cfg *config.Config, tmuxClient *tmux.Client) (*Manager, error) {
 	stateFile, err := config.SessionsPath()
 	if err != nil {
 		return nil, err
@@ -79,7 +80,7 @@ func (m *Manager) Sessions() []Session {
 }
 
 // SpawnSession creates a new Claude Code session for an issue.
-func (m *Manager) SpawnSession(repo config.RepoConfig, issueNumber int, issueTitle string) (*Session, error) {
+func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTitle string) (*Session, error) {
 	sessionName := fmt.Sprintf("gao-%s-%d", repo.Name, issueNumber)
 	branch := fmt.Sprintf("claude/issue-%d", issueNumber)
 
@@ -187,8 +188,8 @@ func (m *Manager) RemoveSession(id string, killTmux bool) error {
 	defer m.mu.Unlock()
 
 	idx := -1
-	for i, s := range m.sessions {
-		if s.ID == id {
+	for i := range m.sessions {
+		if m.sessions[i].ID == id {
 			idx = i
 			break
 		}
@@ -210,8 +211,8 @@ func (m *Manager) FindByIssue(repo string, issueNumber int) *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	for i, s := range m.sessions {
-		if s.Repo == repo && s.IssueNumber == issueNumber {
+	for i := range m.sessions {
+		if m.sessions[i].Repo == repo && m.sessions[i].IssueNumber == issueNumber {
 			return &m.sessions[i]
 		}
 	}
@@ -237,14 +238,14 @@ func (m *Manager) saveState() error {
 
 func (m *Manager) saveStateLocked() error {
 	dir := filepath.Dir(m.stateFile)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	data, err := yaml.Marshal(m.sessions)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.stateFile, data, 0o644)
+	return os.WriteFile(m.stateFile, data, 0o600)
 }
 
 func extractLastActivity(output string) string {

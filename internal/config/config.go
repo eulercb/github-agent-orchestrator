@@ -27,7 +27,7 @@ type RepoConfig struct {
 }
 
 // FullName returns "owner/name".
-func (r RepoConfig) FullName() string {
+func (r *RepoConfig) FullName() string {
 	return r.Owner + "/" + r.Name
 }
 
@@ -52,8 +52,8 @@ type StatusBar struct {
 
 // AttachConfig controls how sessions are attached.
 type AttachConfig struct {
-	Command  string `yaml:"command"`
-	UseWarp  *bool  `yaml:"use_warp"`
+	Command string `yaml:"command"`
+	UseWarp *bool  `yaml:"use_warp"`
 }
 
 // CCUsageConfig configures optional ccusage integration.
@@ -120,7 +120,7 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
-	data, err := os.ReadFile(cfgPath)
+	data, err := os.ReadFile(cfgPath) //nolint:gosec // config path is derived from user's config dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil
@@ -136,13 +136,13 @@ func Load() (Config, error) {
 }
 
 // Save writes the config to disk.
-func Save(cfg Config) error {
+func Save(cfg *Config) error {
 	cfgPath, err := Path()
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
@@ -152,5 +152,5 @@ func Save(cfg Config) error {
 	}
 
 	header := []byte("# gao - GitHub Agent Orchestrator configuration\n# See: https://github.com/eulercb/github-agent-orchestrator\n\n")
-	return os.WriteFile(cfgPath, append(header, data...), 0o644)
+	return os.WriteFile(cfgPath, append(header, data...), 0o600)
 }

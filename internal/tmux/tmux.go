@@ -2,6 +2,7 @@
 package tmux
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -9,11 +10,9 @@ import (
 
 // Session represents a tmux session.
 type Session struct {
-	Name      string
-	Created   string
-	Attached  bool
-	Windows   int
-	PaneCount int
+	Name     string
+	Created  string
+	Attached bool
 }
 
 // Client wraps tmux CLI interactions.
@@ -117,12 +116,12 @@ func (c *Client) IsProcessRunning(session, pattern string) bool {
 	}
 
 	// Check if any child process matches the pattern
-	cmd := exec.Command("pgrep", "-P", pid, "-f", pattern)
+	cmd := exec.CommandContext(context.Background(), "pgrep", "-P", pid, "-f", pattern)
 	return cmd.Run() == nil
 }
 
 func run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	cmd := exec.CommandContext(context.Background(), "tmux", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("tmux %s: %s (%w)", args[0], strings.TrimSpace(string(out)), err)

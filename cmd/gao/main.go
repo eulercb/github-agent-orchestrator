@@ -55,12 +55,12 @@ func run() error {
 	ghClient := github.NewClient()
 	tmuxClient := tmux.NewClient()
 
-	sessMgr, err := claude.NewManager(cfg, tmuxClient)
+	sessMgr, err := claude.NewManager(&cfg, tmuxClient)
 	if err != nil {
 		return fmt.Errorf("init session manager: %w", err)
 	}
 
-	model := tui.NewModel(cfg, ghClient, sessMgr)
+	model := tui.NewModel(&cfg, ghClient, sessMgr)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
@@ -94,7 +94,7 @@ func runInit() {
 		},
 	}
 
-	if err := config.Save(cfg); err != nil {
+	if err := config.Save(&cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
 		os.Exit(1)
 	}

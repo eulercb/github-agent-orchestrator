@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -18,14 +19,16 @@ import (
 // Panel identifies which panel is focused.
 type Panel int
 
+// Panel constants.
 const (
-	PanelIssues   Panel = iota
+	PanelIssues Panel = iota
 	PanelSessions
 )
 
 // View identifies the current screen.
 type View int
 
+// View constants.
 const (
 	ViewDashboard View = iota
 	ViewHelp
@@ -34,7 +37,7 @@ const (
 
 // Model is the top-level Bubble Tea model.
 type Model struct {
-	cfg           config.Config
+	cfg           *config.Config
 	gh            *github.Client
 	sessions      *claude.Manager
 	keys          KeyMap
@@ -59,7 +62,7 @@ type Model struct {
 }
 
 // NewModel creates the initial TUI model.
-func NewModel(cfg config.Config, ghClient *github.Client, sessMgr *claude.Manager) Model {
+func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manager) Model {
 	return Model{
 		cfg:      cfg,
 		gh:       ghClient,
@@ -96,10 +99,6 @@ type openBrowserMsg struct {
 	err error
 }
 
-type statusBarUpdateMsg struct {
-	text string
-}
-
 type tickMsg time.Time
 
 type errMsg struct {
@@ -107,7 +106,7 @@ type errMsg struct {
 }
 
 // Init starts the application.
-func (m Model) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface requires value receiver
 	return tea.Batch(
 		m.fetchIssues(),
 		m.refreshStatuses(),
@@ -116,7 +115,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 // Update handles messages.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -132,7 +131,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.issues = msg.issues
 			m.errorMsg = ""
 		}
-		return m, m.fetchPRs()
+		cmd := m.fetchPRs()
+		return m, cmd
 	case prsLoadedMsg:
 		m.prCache = msg.prs
 		return m, nil
@@ -158,14 +158,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
 		}
 		return m, nil
-	case statusBarUpdateMsg:
-		m.statusBarText = msg.text
-		return m, nil
 	case tickMsg:
 		m.sessions.RefreshStatuses()
 		m.updateStatusBar()
 		m.lastRefresh = time.Now()
-		return m, tea.Batch(m.tickCmd(), m.fetchPRs())
+		cmd := m.fetchPRs()
+		return m, tea.Batch(m.tickCmd(), cmd)
 	case errMsg:
 		m.errorMsg = msg.err.Error()
 		return m, nil
@@ -216,13 +214,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Down):
 		m.moveCursor(1)
 	case key.Matches(msg, m.keys.Spawn):
-		return m, m.spawnSession()
+		cmd := m.spawnSession()
+		return m, cmd
 	case key.Matches(msg, m.keys.Attach):
-		return m, m.attachSession()
+		cmd := m.attachSession()
+		return m, cmd
 	case key.Matches(msg, m.keys.Open):
-		return m, m.openInBrowser()
+		cmd := m.openInBrowser()
+		return m, cmd
 	case key.Matches(msg, m.keys.Delete):
-		return m, m.killSession()
+		m.killSession()
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
 		return m, tea.Batch(m.fetchIssues(), m.refreshStatuses())
@@ -282,7 +283,7 @@ func (m *Model) fetchIssues() tea.Cmd {
 		if repo == nil {
 			return issuesLoadedMsg{err: fmt.Errorf("no repos configured")}
 		}
-		issues, err := m.gh.ListIssues(*repo)
+		issues, err := m.gh.ListIssues(repo)
 		return issuesLoadedMsg{issues: issues, err: err}
 	}
 }
@@ -291,7 +292,8 @@ func (m *Model) fetchPRs() tea.Cmd {
 	return func() tea.Msg {
 		prs := make(map[string]*github.PullRequest)
 		sessions := m.sessions.Sessions()
-		for _, s := range sessions {
+		for i := range sessions {
+			s := &sessions[i]
 			if s.Branch == "" {
 				continue
 			}
@@ -329,7 +331,7 @@ func (m *Model) spawnSession() tea.Cmd {
 	repoCopy := *repo
 
 	return func() tea.Msg {
-		sess, err := m.sessions.SpawnSession(repoCopy, issueNum, issueTitle)
+		sess, err := m.sessions.SpawnSession(&repoCopy, issueNum, issueTitle)
 		return sessionSpawnedMsg{session: sess, err: err}
 	}
 }
@@ -354,7 +356,7 @@ func (m *Model) attachSession() tea.Cmd {
 
 	if useWarp {
 		return func() tea.Msg {
-			cmd := exec.Command("warp-cli", "open-tab", "--", "tmux", "attach-session", "-t", sessionName)
+			cmd := exec.CommandContext(context.Background(), "warp-cli", "open-tab", "--", "tmux", "attach-session", "-t", sessionName)
 			if err := cmd.Run(); err != nil {
 				return errMsg{err: fmt.Errorf("warp attach: %w", err)}
 			}
@@ -364,7 +366,7 @@ func (m *Model) attachSession() tea.Cmd {
 
 	// Default: suspend TUI, attach, resume
 	return tea.ExecProcess(
-		exec.Command("tmux", "attach-session", "-t", sessionName),
+		exec.CommandContext(context.Background(), "tmux", "attach-session", "-t", sessionName),
 		func(err error) tea.Msg {
 			if err != nil {
 				return errMsg{err: fmt.Errorf("tmux attach: %w", err)}
@@ -383,14 +385,7 @@ func (m *Model) openInBrowser() tea.Cmd {
 		}
 		url := issue.URL
 		return func() tea.Msg {
-			cmd := exec.Command("open", url)
-			if err := cmd.Run(); err != nil {
-				// Try xdg-open for Linux
-				cmd = exec.Command("xdg-open", url)
-				err = cmd.Run()
-				return openBrowserMsg{err: err}
-			}
-			return openBrowserMsg{}
+			return openBrowserMsg{err: openURL(url)}
 		}
 	case PanelSessions:
 		sess := m.selectedSession()
@@ -401,23 +396,17 @@ func (m *Model) openInBrowser() tea.Cmd {
 		if ok && pr != nil {
 			url := pr.URL
 			return func() tea.Msg {
-				cmd := exec.Command("open", url)
-				if err := cmd.Run(); err != nil {
-					cmd = exec.Command("xdg-open", url)
-					err = cmd.Run()
-					return openBrowserMsg{err: err}
-				}
-				return openBrowserMsg{}
+				return openBrowserMsg{err: openURL(url)}
 			}
 		}
 	}
 	return nil
 }
 
-func (m *Model) killSession() tea.Cmd {
+func (m *Model) killSession() {
 	sess := m.selectedSession()
 	if sess == nil {
-		return nil
+		return
 	}
 
 	sessID := sess.ID
@@ -427,14 +416,13 @@ func (m *Model) killSession() tea.Cmd {
 		err := m.sessions.RemoveSession(sessID, true)
 		return sessionKilledMsg{id: sessID, err: err}
 	}
-	return nil
 }
 
 func (m *Model) updateStatusBar() {
 	sessions := m.sessions.Sessions()
 	var running, waiting, done, stopped int
-	for _, s := range sessions {
-		switch s.Status {
+	for i := range sessions {
+		switch sessions[i].Status {
 		case claude.StatusRunning:
 			running++
 		case claude.StatusWaiting:
@@ -469,4 +457,14 @@ func (m *Model) tickCmd() tea.Cmd {
 	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func openURL(url string) error {
+	// Try macOS first, then Linux
+	cmd := exec.CommandContext(context.Background(), "open", url)
+	if err := cmd.Run(); err != nil {
+		cmd = exec.CommandContext(context.Background(), "xdg-open", url)
+		return cmd.Run()
+	}
+	return nil
 }

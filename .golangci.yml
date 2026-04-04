@@ -1,44 +1,45 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
 linters:
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
-    - gosimple
     - ineffassign
-    - typecheck
     - gocritic
     - revive
     - misspell
-    - gofmt
-    - goimports
     - bodyclose
     - noctx
     - gosec
-    - prealloc
     - unconvert
     - unparam
     - whitespace
 
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        arguments:
-          - disableStutteringCheck
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-  gosec:
-    excludes:
-      - G204 # subprocess launched with variable - expected for CLI tool
+  settings:
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    gosec:
+      excludes:
+        - G204
 
 run:
   timeout: 5m
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -55,7 +55,7 @@ func TestSaveAndLoad(t *testing.T) {
 		},
 	}
 
-	if err := Save(cfg); err != nil {
+	if err := Save(&cfg); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
 

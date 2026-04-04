@@ -2,6 +2,7 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -12,14 +13,14 @@ import (
 
 // Issue represents a GitHub issue.
 type Issue struct {
-	Number    int      `json:"number"`
-	Title     string   `json:"title"`
-	State     string   `json:"state"`
-	URL       string   `json:"url"`
-	Labels    []Label  `json:"labels"`
-	Assignees []User   `json:"assignees"`
-	Body      string   `json:"body"`
-	Author    User     `json:"author"`
+	Number    int     `json:"number"`
+	Title     string  `json:"title"`
+	State     string  `json:"state"`
+	URL       string  `json:"url"`
+	Labels    []Label `json:"labels"`
+	Assignees []User  `json:"assignees"`
+	Body      string  `json:"body"`
+	Author    User    `json:"author"`
 }
 
 // Label represents a GitHub label.
@@ -34,14 +35,14 @@ type User struct {
 
 // PullRequest represents a GitHub pull request.
 type PullRequest struct {
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	State     string `json:"state"`
-	URL       string `json:"url"`
-	Draft     bool   `json:"isDraft"`
-	HeadRef   string `json:"headRefName"`
-	Mergeable string `json:"mergeable"`
-	ReviewDecision string `json:"reviewDecision"`
+	Number            int        `json:"number"`
+	Title             string     `json:"title"`
+	State             string     `json:"state"`
+	URL               string     `json:"url"`
+	Draft             bool       `json:"isDraft"`
+	HeadRef           string     `json:"headRefName"`
+	Mergeable         string     `json:"mergeable"`
+	ReviewDecision    string     `json:"reviewDecision"`
 	StatusCheckRollup []CheckRun `json:"statusCheckRollup"`
 }
 
@@ -54,10 +55,10 @@ type CheckRun struct {
 
 // PRStatus summarizes the state of a PR for display.
 type PRStatus struct {
-	State    string // OPEN, MERGED, CLOSED
-	Draft    bool
-	Approved bool
-	CIPass   bool
+	State             string // OPEN, MERGED, CLOSED
+	Draft             bool
+	Approved          bool
+	CIPass            bool
 	HasPendingReviews bool
 }
 
@@ -70,7 +71,7 @@ func NewClient() *Client {
 }
 
 // ListIssues fetches issues for a repo with optional filters.
-func (c *Client) ListIssues(repo config.RepoConfig) ([]Issue, error) {
+func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 	args := []string{"issue", "list",
 		"--repo", repo.FullName(),
 		"--json", "number,title,state,url,labels,assignees,body,author",
@@ -142,15 +143,8 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 	return status
 }
 
-// OpenInBrowser opens a URL in the default browser using gh.
-func (c *Client) OpenInBrowser(url string) error {
-	args := []string{"browse", "--url", url}
-	_, err := runGH(args...)
-	return err
-}
-
 func runGH(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
+	cmd := exec.CommandContext(context.Background(), "gh", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
