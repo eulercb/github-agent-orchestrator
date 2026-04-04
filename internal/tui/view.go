@@ -169,7 +169,7 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 	if selected {
 		return styles.SelectedItem.Width(m.width).Render(content)
 	}
-	return styles.NormalItem.Render(content)
+	return styles.NormalItem.Width(m.width).Render(content)
 }
 
 func (m *Model) renderSessionsPanel(maxHeight int) string {
@@ -271,7 +271,7 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	if selected {
 		return styles.SelectedItem.Width(m.width).Render(content)
 	}
-	return styles.NormalItem.Render(content)
+	return styles.NormalItem.Width(m.width).Render(content)
 }
 
 func (m *Model) renderPRStatus(pr *github.PullRequest) string {
