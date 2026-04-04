@@ -78,13 +78,12 @@ Tests avoid external dependencies (no `gh`, `tmux`, or network calls in unit tes
 
 The project uses [golangci-lint](https://golangci-lint.run/) with these linters enabled:
 
-- **errcheck**, **govet**, **staticcheck** — standard correctness
-- **gosimple**, **ineffassign**, **unused**, **unconvert**, **unparam** — dead code and simplification
+- **errcheck**, **govet**, **staticcheck** — correctness and simplification checks
+- **ineffassign**, **unused**, **unconvert**, **unparam** — dead code and simplification
 - **gocritic**, **revive** — style and best practices
 - **gosec** — security (G204 excluded since we intentionally shell out)
 - **gofmt**, **goimports**, **misspell**, **whitespace** — formatting
 - **bodyclose**, **noctx** — HTTP hygiene
-- **prealloc** — performance
 
 ```bash
 make lint

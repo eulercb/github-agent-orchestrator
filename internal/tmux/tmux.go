@@ -8,49 +8,12 @@ import (
 	"strings"
 )
 
-// Session represents a tmux session.
-type Session struct {
-	Name     string
-	Created  string
-	Attached bool
-}
-
 // Client wraps tmux CLI interactions.
 type Client struct{}
 
 // NewClient returns a new tmux client.
 func NewClient() *Client {
 	return &Client{}
-}
-
-// ListSessions returns all tmux sessions.
-func (c *Client) ListSessions() ([]Session, error) {
-	out, err := run("list-sessions", "-F",
-		"#{session_name}\t#{session_created_string}\t#{session_attached}")
-	if err != nil {
-		if strings.Contains(err.Error(), "no server running") ||
-			strings.Contains(err.Error(), "no sessions") {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list sessions: %w", err)
-	}
-
-	var sessions []Session
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		sessions = append(sessions, Session{
-			Name:     parts[0],
-			Created:  parts[1],
-			Attached: parts[2] == "1",
-		})
-	}
-	return sessions, nil
 }
 
 // SessionExists checks if a tmux session exists.
