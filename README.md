@@ -6,22 +6,22 @@
 A terminal dashboard for spawning and managing [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions alongside GitHub issues and pull requests.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  gao                                            eulercb/my-project  │
-├──────────────────────────────────────────────────────────────────────┤
-│  Issues                                                              │
-│  ● #42  Fix login bug                              [bug]             │
-│    #43  Add dark mode                               [feature]        │
-│    #44  Refactor auth module                        [refactor]       │
-├──────────────────────────────────────────────────────────────────────┤
-│  Sessions                                                            │
-│  #42  claude/issue-42   ⚡ working   PR #50 draft                    │
-│  #43  claude/issue-43   ✓  done      PR #51 ✓ approved               │
-│  #44  claude/issue-44   ⏳ waiting   —                               │
-├──────────────────────────────────────────────────────────────────────┤
-│  Sessions: 3  ⚡ 1 working  ⏳ 1 waiting  ✓ 1 done                  │
-│  ↑↓ navigate  tab switch  s spawn  a attach  o open  ? help  q quit │
-└──────────────────────────────────────────────────────────────────────┘
++--------------------------------------------------------------------+
+|  gao                                          eulercb/my-project   |
++--------------------------------------------------------------------+
+|  Issues                                                            |
+|  > #42  Fix login bug                                    [bug]     |
+|    #43  Add dark mode                                    [feature] |
+|    #44  Refactor auth module                             [refactor]|
++--------------------------------------------------------------------+
+|  Sessions                                                          |
+|  #42  claude/issue-42   * working    PR #50 draft                  |
+|  #43  claude/issue-43   + done       PR #51 approved               |
+|  #44  claude/issue-44   ~ waiting    --                            |
++--------------------------------------------------------------------+
+|  Sessions: 3   * 1 working   ~ 1 waiting   + 1 done                |
+|  j/k navigate  tab switch  s spawn  a attach  o open  ? help  q quit|
++--------------------------------------------------------------------+
 ```
 
 ## The workflow
