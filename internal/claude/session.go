@@ -173,6 +173,17 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	m.mu.Unlock()
 
 	if err := m.saveState(); err != nil {
+		// Rollback: remove the session from in-memory state
+		m.mu.Lock()
+		for i := len(m.sessions) - 1; i >= 0; i-- {
+			if m.sessions[i].ID == sess.ID {
+				m.sessions = append(m.sessions[:i], m.sessions[i+1:]...)
+				break
+			}
+		}
+		m.mu.Unlock()
+		// Best-effort cleanup of the tmux session
+		_ = m.tmux.KillSession(sessionName)
 		return nil, fmt.Errorf("save state: %w", err)
 	}
 
@@ -254,7 +265,10 @@ func (m *Manager) loadState() error {
 		}
 		return fmt.Errorf("read sessions state: %w", err)
 	}
-	return yaml.Unmarshal(data, &m.sessions)
+	if err := yaml.Unmarshal(data, &m.sessions); err != nil {
+		return fmt.Errorf("unmarshal sessions state: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) saveState() error {
@@ -266,13 +280,16 @@ func (m *Manager) saveState() error {
 func (m *Manager) saveStateLocked() error {
 	dir := filepath.Dir(m.stateFile)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return err
+		return fmt.Errorf("create state directory %q: %w", dir, err)
 	}
 	data, err := yaml.Marshal(m.sessions)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal sessions state: %w", err)
 	}
-	return os.WriteFile(m.stateFile, data, 0o600)
+	if err := os.WriteFile(m.stateFile, data, 0o600); err != nil {
+		return fmt.Errorf("write sessions state to %q: %w", m.stateFile, err)
+	}
+	return nil
 }
 
 func extractLastActivity(output string) string {

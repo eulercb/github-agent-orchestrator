@@ -97,6 +97,7 @@ type issuesLoadedMsg struct {
 
 type prsLoadedMsg struct {
 	prs map[string]*github.PullRequest
+	err error
 }
 
 type statusRefreshMsg struct{}
@@ -151,6 +152,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		return m, cmd
 	case prsLoadedMsg:
 		m.prCache = msg.prs
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
+		}
 		return m, nil
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()
@@ -322,17 +326,24 @@ func (m *Model) fetchPRs() tea.Cmd {
 	return func() tea.Msg {
 		prs := make(map[string]*github.PullRequest)
 		sessions := m.sessions.Sessions()
+		var firstErr error
 		for i := range sessions {
 			s := &sessions[i]
 			if s.Branch == "" {
 				continue
 			}
 			pr, err := m.gh.FindPRForBranch(s.Repo, s.Branch)
-			if err == nil && pr != nil {
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s@%s: %w", s.Repo, s.Branch, err)
+				}
+				continue
+			}
+			if pr != nil {
 				prs[prCacheKey(s.Repo, s.Branch)] = pr
 			}
 		}
-		return prsLoadedMsg{prs: prs}
+		return prsLoadedMsg{prs: prs, err: firstErr}
 	}
 }
 
