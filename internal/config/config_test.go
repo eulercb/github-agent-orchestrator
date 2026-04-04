@@ -4,38 +4,27 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Spawn.Command != "claude --dangerously-skip-permissions" {
-		t.Errorf("unexpected default spawn command: %s", cfg.Spawn.Command)
-	}
-	if !cfg.Spawn.UseWorktree {
-		t.Error("expected worktree to be enabled by default")
-	}
-	if cfg.CCUsage.Enabled {
-		t.Error("expected ccusage to be disabled by default")
-	}
-	if len(cfg.Repos) != 0 {
-		t.Error("expected no repos by default")
-	}
+	assert.Equal(t, "claude --dangerously-skip-permissions", cfg.Spawn.Command)
+	assert.True(t, cfg.Spawn.UseWorktree, "expected worktree to be enabled by default")
+	assert.False(t, cfg.CCUsage.Enabled, "expected ccusage to be disabled by default")
+	assert.Empty(t, cfg.Repos)
 }
 
 func TestLoadMissingConfig(t *testing.T) {
-	// Temporarily override config dir to a temp location
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
 	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error loading missing config: %v", err)
-	}
-	// Should return defaults
-	if cfg.Spawn.Command != "claude --dangerously-skip-permissions" {
-		t.Errorf("expected default spawn command, got: %s", cfg.Spawn.Command)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "claude --dangerously-skip-permissions", cfg.Spawn.Command)
 }
 
 func TestSaveAndLoad(t *testing.T) {
@@ -53,71 +42,46 @@ func TestSaveAndLoad(t *testing.T) {
 		},
 	}
 
-	if err := Save(&cfg); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
+	require.NoError(t, Save(&cfg))
 
 	// Verify file exists
 	cfgPath := filepath.Join(tmpDir, "gao", "config.yaml")
-	if _, err := os.Stat(cfgPath); err != nil {
-		t.Fatalf("config file not created: %v", err)
-	}
+	_, err := os.Stat(cfgPath)
+	require.NoError(t, err, "config file not created")
 
 	// Load it back
 	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
-	if len(loaded.Repos) != 1 {
-		t.Fatalf("expected 1 repo, got %d", len(loaded.Repos))
-	}
-	if loaded.Repos[0].FullName() != "testowner/testrepo" {
-		t.Errorf("unexpected repo: %s", loaded.Repos[0].FullName())
-	}
-	want := "is:open assignee:@me repo:testowner/testrepo"
-	if loaded.Repos[0].Filters.Search != want {
-		t.Errorf("unexpected search: got %q, want %q", loaded.Repos[0].Filters.Search, want)
-	}
+	require.NoError(t, err)
+	require.Len(t, loaded.Repos, 1)
+	assert.Equal(t, "testowner/testrepo", loaded.Repos[0].FullName())
+	assert.Equal(t, "is:open assignee:@me repo:testowner/testrepo", loaded.Repos[0].Filters.Search)
 }
 
 func TestRepoFullName(t *testing.T) {
 	r := RepoConfig{Owner: "foo", Name: "bar"}
-	if r.FullName() != "foo/bar" {
-		t.Errorf("expected foo/bar, got %s", r.FullName())
-	}
+	assert.Equal(t, "foo/bar", r.FullName())
 }
 
 func TestIssueRepoFullName(t *testing.T) {
 	// Without IssueSource, falls back to main repo
 	r := RepoConfig{Owner: "foo", Name: "bar"}
-	if r.IssueRepoFullName() != "foo/bar" {
-		t.Errorf("expected foo/bar, got %s", r.IssueRepoFullName())
-	}
+	assert.Equal(t, "foo/bar", r.IssueRepoFullName())
 
 	// With IssueSource, returns the issue source repo
 	r.IssueSource = &IssueSource{Owner: "org", Name: "issues"}
-	if r.IssueRepoFullName() != "org/issues" {
-		t.Errorf("expected org/issues, got %s", r.IssueRepoFullName())
-	}
+	assert.Equal(t, "org/issues", r.IssueRepoFullName())
 
 	// With empty IssueSource fields, falls back to main repo
 	r.IssueSource = &IssueSource{Owner: "", Name: ""}
-	if r.IssueRepoFullName() != "foo/bar" {
-		t.Errorf("expected foo/bar for empty issue source, got %s", r.IssueRepoFullName())
-	}
+	assert.Equal(t, "foo/bar", r.IssueRepoFullName())
 
 	// Partial IssueSource: only Name set, Owner inherited from main repo
 	r.IssueSource = &IssueSource{Owner: "", Name: "other-repo"}
-	if r.IssueRepoFullName() != "foo/other-repo" {
-		t.Errorf("expected foo/other-repo for partial issue source, got %s", r.IssueRepoFullName())
-	}
+	assert.Equal(t, "foo/other-repo", r.IssueRepoFullName())
 
 	// Partial IssueSource: only Owner set, Name inherited from main repo
 	r.IssueSource = &IssueSource{Owner: "other-org", Name: ""}
-	if r.IssueRepoFullName() != "other-org/bar" {
-		t.Errorf("expected other-org/bar for partial issue source, got %s", r.IssueRepoFullName())
-	}
+	assert.Equal(t, "other-org/bar", r.IssueRepoFullName())
 }
 
 func TestSaveAndLoadWithIssueSource(t *testing.T) {
@@ -139,30 +103,15 @@ func TestSaveAndLoadWithIssueSource(t *testing.T) {
 		},
 	}
 
-	if err := Save(&cfg); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
+	require.NoError(t, Save(&cfg))
 
 	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
-	if len(loaded.Repos) != 1 {
-		t.Fatalf("expected 1 repo, got %d", len(loaded.Repos))
-	}
+	require.NoError(t, err)
+	require.Len(t, loaded.Repos, 1)
 
 	repo := &loaded.Repos[0]
-	if repo.FullName() != "myorg/myapp" {
-		t.Errorf("unexpected repo: %s", repo.FullName())
-	}
-	if repo.IssueSource == nil {
-		t.Fatal("expected issue_source to be set")
-	}
-	if repo.IssueRepoFullName() != "myorg/project-issues" {
-		t.Errorf("unexpected issue repo: %s", repo.IssueRepoFullName())
-	}
-	if repo.Filters.Search != "is:open repo:myorg/project-issues" {
-		t.Errorf("unexpected search: %s", repo.Filters.Search)
-	}
+	assert.Equal(t, "myorg/myapp", repo.FullName())
+	require.NotNil(t, repo.IssueSource)
+	assert.Equal(t, "myorg/project-issues", repo.IssueRepoFullName())
+	assert.Equal(t, "is:open repo:myorg/project-issues", repo.Filters.Search)
 }

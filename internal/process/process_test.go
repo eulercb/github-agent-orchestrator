@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStartBackgroundAndIsRunning(t *testing.T) {
@@ -13,22 +16,14 @@ func TestStartBackgroundAndIsRunning(t *testing.T) {
 	logFile := filepath.Join(dir, "test.log")
 
 	pid, err := StartBackground(dir, logFile, "sh", "-c", "sleep 30")
-	if err != nil {
-		t.Fatalf("StartBackground() error: %v", err)
-	}
-	if pid <= 0 {
-		t.Fatalf("StartBackground() returned invalid pid: %d", pid)
-	}
+	require.NoError(t, err)
+	require.Positive(t, pid)
 
 	// Process should be running.
-	if !IsRunning(pid) {
-		t.Errorf("IsRunning(%d) = false, want true", pid)
-	}
+	assert.True(t, IsRunning(pid), "process should be running")
 
 	// Kill it and verify it stops.
-	if err := Kill(pid); err != nil {
-		t.Fatalf("Kill(%d) error: %v", pid, err)
-	}
+	require.NoError(t, Kill(pid))
 
 	// Wait briefly for the process to exit.
 	deadline := time.Now().Add(2 * time.Second)
@@ -38,9 +33,7 @@ func TestStartBackgroundAndIsRunning(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if IsRunning(pid) {
-		t.Errorf("IsRunning(%d) = true after Kill, want false", pid)
-	}
+	assert.False(t, IsRunning(pid), "process should not be running after Kill")
 }
 
 func TestStartBackgroundWritesLog(t *testing.T) {
@@ -48,9 +41,7 @@ func TestStartBackgroundWritesLog(t *testing.T) {
 	logFile := filepath.Join(dir, "test.log")
 
 	pid, err := StartBackground(dir, logFile, "sh", "-c", "echo hello && echo world")
-	if err != nil {
-		t.Fatalf("StartBackground() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for the short-lived process to finish.
 	deadline := time.Now().Add(2 * time.Second)
@@ -62,12 +53,9 @@ func TestStartBackgroundWritesLog(t *testing.T) {
 	}
 
 	got, err := ReadLastLines(logFile, 5)
-	if err != nil {
-		t.Fatalf("ReadLastLines() error: %v", err)
-	}
-	if !strings.Contains(got, "hello") || !strings.Contains(got, "world") {
-		t.Errorf("log output = %q, want it to contain 'hello' and 'world'", got)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, got, "hello")
+	assert.Contains(t, got, "world")
 }
 
 func TestKillAlreadyDeadProcess(t *testing.T) {
@@ -75,9 +63,7 @@ func TestKillAlreadyDeadProcess(t *testing.T) {
 	logFile := filepath.Join(dir, "test.log")
 
 	pid, err := StartBackground(dir, logFile, "sh", "-c", "true")
-	if err != nil {
-		t.Fatalf("StartBackground() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for it to exit on its own.
 	deadline := time.Now().Add(2 * time.Second)
@@ -89,18 +75,12 @@ func TestKillAlreadyDeadProcess(t *testing.T) {
 	}
 
 	// Killing an already-dead process should not return an error.
-	if err := Kill(pid); err != nil {
-		t.Errorf("Kill(%d) on dead process returned error: %v", pid, err)
-	}
+	assert.NoError(t, Kill(pid))
 }
 
 func TestIsRunningInvalidPID(t *testing.T) {
-	if IsRunning(0) {
-		t.Error("IsRunning(0) = true, want false")
-	}
-	if IsRunning(-1) {
-		t.Error("IsRunning(-1) = true, want false")
-	}
+	assert.False(t, IsRunning(0))
+	assert.False(t, IsRunning(-1))
 }
 
 func TestReadLastLines(t *testing.T) {
@@ -158,26 +138,18 @@ func TestReadLastLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "test.log")
-			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o600))
 
 			got, err := ReadLastLines(path, tt.n)
-			if err != nil {
-				t.Fatalf("ReadLastLines() error: %v", err)
-			}
-			if got != tt.expect {
-				t.Errorf("ReadLastLines() = %q, want %q", got, tt.expect)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expect, got)
 		})
 	}
 }
 
 func TestReadLastLinesNonexistentFile(t *testing.T) {
 	_, err := ReadLastLines("/nonexistent/path/file.log", 5)
-	if err == nil {
-		t.Error("ReadLastLines() expected error for nonexistent file, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestReadLastLinesLargeFile(t *testing.T) {
@@ -191,17 +163,11 @@ func TestReadLastLinesLargeFile(t *testing.T) {
 	}
 	content := strings.Join(lines, "\n") + "\n"
 
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
 	got, err := ReadLastLines(path, 3)
-	if err != nil {
-		t.Fatalf("ReadLastLines() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	resultLines := strings.Split(got, "\n")
-	if len(resultLines) != 3 {
-		t.Errorf("expected 3 lines, got %d: %q", len(resultLines), got)
-	}
+	assert.Len(t, resultLines, 3)
 }
