@@ -43,15 +43,16 @@ type User struct {
 
 // PullRequest represents a GitHub pull request.
 type PullRequest struct {
-	Number         int     `json:"number"`
-	Title          string  `json:"title"`
-	State          string  `json:"state"`
-	URL            string  `json:"url"`
-	Draft          bool    `json:"isDraft"`
-	HeadRef        string  `json:"headRefName"`
-	ReviewDecision string  `json:"reviewDecision"`
-	Author         User    `json:"author"`
-	Labels         []Label `json:"labels"`
+	Number         int        `json:"number"`
+	Title          string     `json:"title"`
+	State          string     `json:"state"`
+	URL            string     `json:"url"`
+	Draft          bool       `json:"isDraft"`
+	HeadRef        string     `json:"headRefName"`
+	ReviewDecision string     `json:"reviewDecision"`
+	Author         User       `json:"author"`
+	Labels         []Label    `json:"labels"`
+	Repository     Repository `json:"-"` // set by caller, not from JSON
 }
 
 // PRStatus summarizes the state of a PR for display.
@@ -147,29 +148,47 @@ func hasTypeQualifier(query string) bool {
 	return false
 }
 
-// ListPRs fetches pull requests for a repository using "gh pr list".
-// The search parameter is passed to --search when non-empty.
-func (c *Client) ListPRs(repoFullName, search string) ([]PullRequest, error) {
-	args := []string{"pr", "list",
-		"--repo", repoFullName,
-		"--state", "open",
-		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
-		"--limit", "50",
-	}
-	if search != "" {
-		args = append(args, "--search", search)
-	}
+// ListPRs fetches pull requests for the given repositories using "gh pr list".
+// Results from all repos are merged. The search parameter is passed to --search
+// when non-empty. Each returned PR has its Repository field set.
+func (c *Client) ListPRs(repos []string, search string) ([]PullRequest, error) {
+	var allPRs []PullRequest
+	var firstErr error
+	for _, repoFullName := range repos {
+		args := []string{"pr", "list",
+			"--repo", repoFullName,
+			"--state", "open",
+			"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
+			"--limit", "50",
+		}
+		if search != "" {
+			args = append(args, "--search", search)
+		}
 
-	out, err := runGH(args...)
-	if err != nil {
-		return nil, fmt.Errorf("list PRs for %s: %w", repoFullName, err)
-	}
+		out, err := runGH(args...)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("list PRs for %s: %w", repoFullName, err)
+			}
+			continue
+		}
 
-	var prs []PullRequest
-	if err := json.Unmarshal(out, &prs); err != nil {
-		return nil, fmt.Errorf("parse PR list: %w", err)
+		var prs []PullRequest
+		if err := json.Unmarshal(out, &prs); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("parse PR list for %s: %w", repoFullName, err)
+			}
+			continue
+		}
+		for i := range prs {
+			prs[i].Repository = Repository{NameWithOwner: repoFullName}
+		}
+		allPRs = append(allPRs, prs...)
 	}
-	return prs, nil
+	if len(allPRs) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return allPRs, nil
 }
 
 // FindPRForBranch looks for a PR with the given head branch.

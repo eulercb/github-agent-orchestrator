@@ -371,6 +371,18 @@ func (m *Model) renderPRsPanel(maxHeight int) string {
 		lines = append(lines, styles.MutedText.Render("  No open pull requests"))
 	}
 
+	// Determine if PRs span multiple repos so we can show repo prefixes.
+	multiRepo := false
+	if len(m.prList) > 1 {
+		first := m.prList[0].Repository.NameWithOwner
+		for i := 1; i < len(m.prList); i++ {
+			if m.prList[i].Repository.NameWithOwner != first {
+				multiRepo = true
+				break
+			}
+		}
+	}
+
 	visibleCount := maxHeight - 2
 	if visibleCount < 1 {
 		visibleCount = 1
@@ -388,20 +400,32 @@ func (m *Model) renderPRsPanel(maxHeight int) string {
 
 	for i := start; i < end; i++ {
 		selected := panelActive && i == m.prCursor
-		line := m.renderPRListLine(&m.prList[i], selected)
+		line := m.renderPRListLine(&m.prList[i], selected, multiRepo)
 		lines = append(lines, line)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m *Model) renderPRListLine(pr *github.PullRequest, selected bool) string {
+func (m *Model) renderPRListLine(pr *github.PullRequest, selected, multiRepo bool) string {
 	// Session indicator
 	indicator := "  "
-	if repo := m.currentRepo(); repo != nil {
-		if sess := m.findSessionByRepoBranch(repo.FullName(), pr.HeadRef); sess != nil {
+	repoName := pr.Repository.NameWithOwner
+	if repoName == "" {
+		if repo := m.currentRepo(); repo != nil {
+			repoName = repo.FullName()
+		}
+	}
+	if repoName != "" {
+		if sess := m.findSessionByRepoBranch(repoName, pr.HeadRef); sess != nil {
 			indicator = "● "
 		}
+	}
+
+	// Show repo name only when results span multiple repos.
+	repoPrefix := ""
+	if multiRepo && pr.Repository.NameWithOwner != "" {
+		repoPrefix = styles.MutedText.Render(pr.Repository.NameWithOwner) + " "
 	}
 
 	number := fmt.Sprintf("#%-5d", pr.Number)
@@ -410,7 +434,7 @@ func (m *Model) renderPRListLine(pr *github.PullRequest, selected bool) string {
 	statusStr := m.renderPRStatus(pr)
 
 	// Title with truncation
-	maxTitleLen := m.width - 40 - lipgloss.Width(statusStr)
+	maxTitleLen := m.width - 40 - lipgloss.Width(statusStr) - lipgloss.Width(repoPrefix)
 	if maxTitleLen < 10 {
 		maxTitleLen = 10
 	}
@@ -436,7 +460,7 @@ func (m *Model) renderPRListLine(pr *github.PullRequest, selected bool) string {
 		labelStr = styles.MutedText.Render(" [" + strings.Join(labels, ", ") + "]")
 	}
 
-	content := fmt.Sprintf("%s%s %s  %s%s%s", indicator, number, title, statusStr, authorStr, labelStr)
+	content := fmt.Sprintf("%s%s%s %s  %s%s%s", indicator, repoPrefix, number, title, statusStr, authorStr, labelStr)
 
 	if selected {
 		return styles.SelectedItem.Width(m.width).Render(content)

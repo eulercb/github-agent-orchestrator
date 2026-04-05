@@ -214,6 +214,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		}
 		return m, filterCmd
 	case prListLoadedMsg:
+		m.loading = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("PR list refresh: %v", msg.err)
 		} else {
@@ -505,8 +506,7 @@ func (m *Model) findSessionByRepoBranch(repo, branch string) *claude.Session {
 	sessions := m.sessions.Sessions()
 	for i := range sessions {
 		if sessions[i].Repo == repo && sessions[i].Branch == branch {
-			sess := sessions[i]
-			return &sess
+			return &sessions[i]
 		}
 	}
 	return nil
@@ -527,12 +527,15 @@ func (m *Model) fetchIssues() tea.Cmd {
 
 func (m *Model) fetchPRList() tea.Cmd {
 	search := m.prFilter
+	var repos []string
+	for i := range m.cfg.Repos {
+		repos = append(repos, m.cfg.Repos[i].FullName())
+	}
 	return func() tea.Msg {
-		repo := m.currentRepo()
-		if repo == nil {
+		if len(repos) == 0 {
 			return prListLoadedMsg{err: fmt.Errorf("no repos configured")}
 		}
-		prs, err := m.gh.ListPRs(repo.FullName(), search)
+		prs, err := m.gh.ListPRs(repos, search)
 		return prListLoadedMsg{prs: prs, err: err}
 	}
 }
@@ -700,11 +703,15 @@ func (m *Model) openInBrowser() tea.Cmd {
 		if pr == nil {
 			return nil
 		}
-		repo := m.currentRepo()
-		if repo == nil {
+		repoName := pr.Repository.NameWithOwner
+		if repoName == "" {
+			if repo := m.currentRepo(); repo != nil {
+				repoName = repo.FullName()
+			}
+		}
+		if repoName == "" {
 			return nil
 		}
-		repoName := repo.FullName()
 		number := pr.Number
 		ghClient := m.gh
 		return func() tea.Msg {
@@ -734,12 +741,14 @@ func (m *Model) clearSessionForPR() {
 	if pr == nil {
 		return
 	}
-	repo := m.currentRepo()
-	if repo == nil {
-		return
+	repoName := pr.Repository.NameWithOwner
+	if repoName == "" {
+		if repo := m.currentRepo(); repo != nil {
+			repoName = repo.FullName()
+		}
 	}
 
-	sess := m.findSessionByRepoBranch(repo.FullName(), pr.HeadRef)
+	sess := m.findSessionByRepoBranch(repoName, pr.HeadRef)
 	if sess == nil {
 		m.errorMsg = fmt.Sprintf("No session found for PR #%d", pr.Number)
 		return
