@@ -150,9 +150,8 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
 		IssueNumber: issueNumber,
 		IssueRepo:   issueRepo,
-	}); writeErr != nil {
-		// Non-fatal: the session can still function without the metadata file.
-		_ = writeErr
+	}); writeErr != nil && m.cfg.Spawn.UseWorktree {
+		return nil, fmt.Errorf("persist worktree metadata: %w", writeErr)
 	}
 
 	// Determine log file path
@@ -436,7 +435,10 @@ func parseWorktreeList(output string) []Worktree {
 // When the metadata is resolved via GitHub, it is persisted to the file
 // so subsequent imports are instant.
 func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Session, error) {
-	issueNumber, issueRepo := m.resolveWorktreeIssue(repo, wt)
+	issueNumber, issueRepo, err := m.resolveWorktreeIssue(repo, wt)
+	if err != nil {
+		return nil, fmt.Errorf("resolve issue for worktree %s: %w", wt.Path, err)
+	}
 
 	// Build session name consistent with SpawnSession conventions.
 	sessionName := m.buildSessionName(repo, wt, issueNumber, issueRepo)
@@ -483,30 +485,34 @@ func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Sessio
 
 // resolveWorktreeIssue determines the issue number and repo for a worktree.
 // It tries the local metadata file first, then GitHub GraphQL, persisting
-// the result on success.
-func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (issueNumber int, issueRepo string) {
+// the result on success. Returns an error only when the metadata file exists
+// but cannot be read/parsed (to avoid silently dropping associations).
+func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (issueNumber int, issueRepo string, err error) {
 	// 1. Try the local metadata file.
-	meta, err := readWorktreeMetadata(wt.Path)
-	if err == nil && meta != nil && meta.IssueNumber > 0 {
-		return meta.IssueNumber, meta.IssueRepo
+	meta, metaErr := readWorktreeMetadata(wt.Path)
+	if metaErr != nil {
+		return 0, "", metaErr
+	}
+	if meta != nil && meta.IssueNumber > 0 {
+		return meta.IssueNumber, meta.IssueRepo, nil
 	}
 
 	// 2. Try GitHub GraphQL to find the PR's linked issue.
 	if m.gh != nil && wt.Branch != "" {
 		linked, ghErr := m.gh.FindLinkedIssue(repo.FullName(), wt.Branch)
 		if ghErr == nil && linked != nil {
-			issueRepo := linked.Repository
+			issueRepo = linked.Repository
 			// Persist so we don't need the API next time.
 			_ = writeWorktreeMetadata(wt.Path, &worktreeMetadata{
 				IssueNumber: linked.Number,
 				IssueRepo:   issueRepo,
 			})
-			return linked.Number, issueRepo
+			return linked.Number, issueRepo, nil
 		}
 	}
 
 	// 3. No issue association found.
-	return 0, ""
+	return 0, "", nil
 }
 
 // buildSessionName generates a session ID consistent with SpawnSession.

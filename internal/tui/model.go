@@ -356,8 +356,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
-		cmd := m.importWorktrees()
-		return m, cmd
+		if m.activePanel == PanelSessions {
+			cmd := m.importWorktrees()
+			return m, cmd
+		}
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd

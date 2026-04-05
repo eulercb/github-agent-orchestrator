@@ -285,9 +285,24 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
 				} `json:"pullRequests"`
 			} `json:"repository"`
 		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	if err := json.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("parse graphql response: %w", err)
+	}
+	if len(result.Errors) > 0 {
+		var messages []string
+		for _, gqlErr := range result.Errors {
+			if gqlErr.Message != "" {
+				messages = append(messages, gqlErr.Message)
+			}
+		}
+		if len(messages) == 0 {
+			return nil, fmt.Errorf("graphql linked issues: unknown error")
+		}
+		return nil, fmt.Errorf("graphql linked issues: %s", strings.Join(messages, "; "))
 	}
 
 	prs := result.Data.Repository.PullRequests.Nodes

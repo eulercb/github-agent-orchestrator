@@ -530,7 +530,7 @@ func (m *Model) viewHelp() string {
     Esc          Go back
 
   Actions:
-    /            Edit issue filter (GitHub search syntax)
+    /            Edit issue/PR filter in Issues or PRs panels (GitHub search syntax)
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
     w            Import worktrees as sessions (with PR association)
