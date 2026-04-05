@@ -146,13 +146,11 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
-	// When the filter input is active, only intercept key messages so
-	// background refreshes, async loads, and window resizes still flow
-	// through the normal update path.
+	// When the filter input is active, forward all messages to the
+	// textinput (cursor blink, window resize, etc.) but intercept
+	// Enter/Esc key messages first.
 	if m.currentView == ViewFilter {
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			return m.updateFilter(keyMsg)
-		}
+		return m.updateFilter(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -319,35 +317,46 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateFilter handles key input while the filter editor is active.
-func (m *Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEnter:
-		// Apply the filter and refresh issues.
-		m.currentView = ViewDashboard
-		m.filterInput.Blur()
-		query := strings.TrimSpace(m.filterInput.Value())
-		repo := m.currentRepo()
-		if repo != nil {
-			repo.Filters.Search = query
-			// Clear individual filters so they don't silently re-apply
-			// if the user later clears the search query.
-			repo.Filters.Assignee = ""
-			repo.Filters.State = ""
-			repo.Filters.Labels = nil
+// updateFilter handles all messages while the filter editor is active.
+// Enter applies the filter, Esc cancels, window resizes update width,
+// and everything else (including cursor blink) is forwarded to the
+// textinput so it stays functional.
+func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			// Apply the filter and refresh issues.
+			m.currentView = ViewDashboard
+			m.filterInput.Blur()
+			query := strings.TrimSpace(m.filterInput.Value())
+			repo := m.currentRepo()
+			if repo != nil {
+				// Set Search; individual filters are preserved and will
+				// re-apply if the user later clears the search query.
+				repo.Filters.Search = query
+			}
+			m.loading = true
+			m.issuesCursor = 0
+			cmd := m.fetchIssues()
+			return m, cmd
+		case tea.KeyEsc:
+			// Cancel: restore the previous value.
+			m.currentView = ViewDashboard
+			m.filterInput.Blur()
+			if repo := m.currentRepo(); repo != nil {
+				m.filterInput.SetValue(repo.Filters.Search)
+			}
+			return m, nil
 		}
-		m.loading = true
-		m.issuesCursor = 0
-		cmd := m.fetchIssues()
-		return m, cmd
-	case tea.KeyEsc:
-		// Cancel: restore the previous value.
-		m.currentView = ViewDashboard
-		m.filterInput.Blur()
-		if repo := m.currentRepo(); repo != nil {
-			m.filterInput.SetValue(repo.Filters.Search)
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		inputWidth := m.width - 10
+		if inputWidth < 20 {
+			inputWidth = 20
 		}
-		return m, nil
+		m.filterInput.Width = inputWidth
 	}
 
 	var cmd tea.Cmd

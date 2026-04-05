@@ -139,6 +139,13 @@ func TestBuildSearch(t *testing.T) {
 		t.Errorf("BuildSearch() with state=all = %q, want %q", got, "assignee:@me")
 	}
 
+	// Labels with spaces are quoted.
+	f = IssueFilters{Labels: []string{"good first issue", "bug"}}
+	want = `label:"good first issue" label:bug`
+	if got := f.BuildSearch(); got != want {
+		t.Errorf("BuildSearch() quoted label = %q, want %q", got, want)
+	}
+
 	// Empty filters returns empty string.
 	f = IssueFilters{}
 	if got := f.BuildSearch(); got != "" {

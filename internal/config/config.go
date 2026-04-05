@@ -87,7 +87,11 @@ func (f *IssueFilters) BuildSearch() string {
 		parts = append(parts, "assignee:"+f.Assignee)
 	}
 	for _, label := range f.Labels {
-		parts = append(parts, "label:"+label)
+		if strings.Contains(label, " ") {
+			parts = append(parts, "label:\""+label+"\"")
+		} else {
+			parts = append(parts, "label:"+label)
+		}
 	}
 	return strings.Join(parts, " ")
 }
