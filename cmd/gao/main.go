@@ -51,11 +51,42 @@ func run() error {
 	}
 
 	if len(cfg.Repos) == 0 {
-		p, pathErr := config.Path()
+		cfgPath, pathErr := config.Path()
 		if pathErr != nil {
-			fmt.Fprintf(os.Stderr, "No repos configured and config path unavailable: %v\n", pathErr)
-		} else {
-			fmt.Printf("No repos configured. Add a repo to %s:\n\n", p)
+			return fmt.Errorf("config path: %w", pathErr)
+		}
+
+		_, statErr := os.Stat(cfgPath)
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return fmt.Errorf("stat config %s: %w", cfgPath, statErr)
+		}
+
+		if os.IsNotExist(statErr) {
+			// Non-interactive context (piped stdin, CI): don't block on prompts.
+			if fi, fiErr := os.Stdin.Stat(); fiErr == nil && fi.Mode()&os.ModeCharDevice == 0 {
+				fmt.Fprintf(os.Stderr, "No config found. Run 'gao init' interactively to create one.\n")
+				return nil
+			}
+
+			// No config file found — run init automatically.
+			fmt.Println("No config found. Let's set one up!")
+			fmt.Println()
+
+			if initErr := doInit(); initErr != nil {
+				return fmt.Errorf("init: %w", initErr)
+			}
+
+			// Reload config after init.
+			cfg, err = config.Load()
+			if err != nil {
+				return fmt.Errorf("load config after init: %w", err)
+			}
+
+			fmt.Printf("\nConfig created at %s\n", cfgPath)
+		}
+
+		if len(cfg.Repos) == 0 {
+			fmt.Printf("No repos configured. Add a repo to %s:\n\n", cfgPath)
 			fmt.Println("repos:")
 			fmt.Println("  - owner: your-github-username")
 			fmt.Println("    name: your-repo-name")
@@ -63,8 +94,11 @@ func run() error {
 			fmt.Println("      assignee: '@me'")
 			fmt.Println("      state: open")
 			fmt.Println()
+			return nil
 		}
-		return nil
+
+		fmt.Println("Initialization complete! Starting dashboard...")
+		fmt.Println()
 	}
 
 	ghClient := github.NewClient()
@@ -100,6 +134,28 @@ func runInit() {
 		os.Exit(1)
 	}
 
+	if err := doInit(); err != nil {
+		fmt.Fprintf(os.Stderr, "gao: init: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\nConfig created at %s\n", cfgPath)
+
+	cfg, loadErr := config.Load()
+	if loadErr != nil {
+		fmt.Fprintf(os.Stderr, "gao: failed to read config after init: %v\n", loadErr)
+		os.Exit(1)
+	}
+
+	if len(cfg.Repos) > 0 {
+		fmt.Println("Run 'gao' to start the dashboard.")
+	} else {
+		fmt.Println("Add a repo to the config, then run 'gao' to start.")
+	}
+}
+
+// doInit runs the interactive config setup and saves the result.
+func doInit() error {
 	scanner := bufio.NewScanner(os.Stdin)
 	cfg := config.DefaultConfig()
 
@@ -125,16 +181,10 @@ func runInit() {
 	}
 
 	if err := config.Save(&cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("save config: %w", err)
 	}
 
-	fmt.Printf("\nConfig created at %s\n", cfgPath)
-	if len(cfg.Repos) > 0 {
-		fmt.Println("Run 'gao' to start the dashboard.")
-	} else {
-		fmt.Println("Add a repo to the config, then run 'gao' to start.")
-	}
+	return nil
 }
 
 // prompt asks the user for input with an optional default value.
