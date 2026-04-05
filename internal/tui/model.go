@@ -580,6 +580,9 @@ func (m *Model) openInBrowser() tea.Cmd {
 			return nil
 		}
 		repo := issue.Repository.NameWithOwner
+		if repo == "" {
+			repo = m.currentRepo().IssueRepoFullName()
+		}
 		number := issue.Number
 		ghClient := m.gh
 		return func() tea.Msg {
