@@ -146,6 +146,13 @@ func TestBuildSearch(t *testing.T) {
 		t.Errorf("BuildSearch() quoted label = %q, want %q", got, want)
 	}
 
+	// Labels with embedded quotes are escaped.
+	f = IssueFilters{Labels: []string{`team "alpha"`}}
+	want = `label:"team \"alpha\""`
+	if got := f.BuildSearch(); got != want {
+		t.Errorf("BuildSearch() escaped label = %q, want %q", got, want)
+	}
+
 	// Empty filters returns empty string.
 	f = IssueFilters{}
 	if got := f.BuildSearch(); got != "" {

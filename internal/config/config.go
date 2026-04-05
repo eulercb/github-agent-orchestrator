@@ -87,8 +87,10 @@ func (f *IssueFilters) BuildSearch() string {
 		parts = append(parts, "assignee:"+f.Assignee)
 	}
 	for _, label := range f.Labels {
-		if strings.Contains(label, " ") {
-			parts = append(parts, "label:\""+label+"\"")
+		if strings.ContainsAny(label, " \"\\") {
+			escaped := strings.ReplaceAll(label, `\`, `\\`)
+			escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+			parts = append(parts, "label:\""+escaped+"\"")
 		} else {
 			parts = append(parts, "label:"+label)
 		}

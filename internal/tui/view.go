@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
-	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui/styles"
 )
@@ -361,7 +360,7 @@ func (m *Model) renderHelpBar() string {
 }
 
 func (m *Model) viewHelp() string {
-	cfgPath, _ := config.Path()
+	cfgPath := m.cfgPath
 	if cfgPath == "" {
 		cfgPath = "~/.config/gao/config.yaml"
 	}

@@ -51,6 +51,7 @@ type Model struct {
 	statusProv    *statusbar.Provider
 	keys          KeyMap
 	width, height int
+	cfgPath       string
 
 	// State
 	currentView   View
@@ -86,6 +87,8 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		ti.SetValue(cfg.Repos[0].Filters.Search)
 	}
 
+	cfgPath, _ := config.Path()
+
 	return Model{
 		cfg:         cfg,
 		gh:          ghClient,
@@ -94,6 +97,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		keys:        DefaultKeyMap(),
 		prCache:     make(map[string]*github.PullRequest),
 		filterInput: ti,
+		cfgPath:     cfgPath,
 	}
 }
 
@@ -325,6 +329,8 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
+		case tea.KeyCtrlC:
+			return m, tea.Quit
 		case tea.KeyEnter:
 			// Apply the filter and refresh issues.
 			m.currentView = ViewDashboard
