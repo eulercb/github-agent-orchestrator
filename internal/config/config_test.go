@@ -48,9 +48,7 @@ func TestSaveAndLoad(t *testing.T) {
 			Owner: "testowner",
 			Name:  "testrepo",
 			Filters: IssueFilters{
-				Assignee: "@me",
-				Labels:   []string{"bug"},
-				State:    "open",
+				Search: "is:open assignee:@me repo:testowner/testrepo",
 			},
 		},
 	}
@@ -77,86 +75,9 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.Repos[0].FullName() != "testowner/testrepo" {
 		t.Errorf("unexpected repo: %s", loaded.Repos[0].FullName())
 	}
-	if loaded.Repos[0].Filters.Assignee != "@me" {
-		t.Errorf("unexpected assignee: %s", loaded.Repos[0].Filters.Assignee)
-	}
-	if len(loaded.Repos[0].Filters.Labels) != 1 || loaded.Repos[0].Filters.Labels[0] != "bug" {
-		t.Errorf("unexpected labels: %v", loaded.Repos[0].Filters.Labels)
-	}
-}
-
-func TestSaveAndLoadWithSearch(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	cfg := DefaultConfig()
-	cfg.Repos = []RepoConfig{
-		{
-			Owner: "testowner",
-			Name:  "testrepo",
-			Filters: IssueFilters{
-				Search: "is:open assignee:@me archived:false user:my-org",
-			},
-		},
-	}
-
-	if err := Save(&cfg); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-
-	loaded, err := Load()
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
-	if len(loaded.Repos) != 1 {
-		t.Fatalf("expected 1 repo, got %d", len(loaded.Repos))
-	}
-
-	want := "is:open assignee:@me archived:false user:my-org"
+	want := "is:open assignee:@me repo:testowner/testrepo"
 	if loaded.Repos[0].Filters.Search != want {
-		t.Errorf("unexpected search filter: got %q, want %q", loaded.Repos[0].Filters.Search, want)
-	}
-}
-
-func TestBuildSearch(t *testing.T) {
-	// Returns existing Search as-is.
-	f := IssueFilters{Search: "custom query"}
-	if got := f.BuildSearch(); got != "custom query" {
-		t.Errorf("expected existing search, got %q", got)
-	}
-
-	// Synthesizes from individual filters.
-	f = IssueFilters{State: "open", Assignee: "@me", Labels: []string{"bug", "p1"}}
-	want := "is:open assignee:@me label:bug label:p1"
-	if got := f.BuildSearch(); got != want {
-		t.Errorf("BuildSearch() = %q, want %q", got, want)
-	}
-
-	// State "all" is omitted.
-	f = IssueFilters{State: "all", Assignee: "@me"}
-	if got := f.BuildSearch(); got != "assignee:@me" {
-		t.Errorf("BuildSearch() with state=all = %q, want %q", got, "assignee:@me")
-	}
-
-	// Labels with spaces are quoted.
-	f = IssueFilters{Labels: []string{"good first issue", "bug"}}
-	want = `label:"good first issue" label:bug`
-	if got := f.BuildSearch(); got != want {
-		t.Errorf("BuildSearch() quoted label = %q, want %q", got, want)
-	}
-
-	// Labels with embedded quotes are escaped.
-	f = IssueFilters{Labels: []string{`team "alpha"`}}
-	want = `label:"team \"alpha\""`
-	if got := f.BuildSearch(); got != want {
-		t.Errorf("BuildSearch() escaped label = %q, want %q", got, want)
-	}
-
-	// Empty filters returns empty string.
-	f = IssueFilters{}
-	if got := f.BuildSearch(); got != "" {
-		t.Errorf("BuildSearch() empty = %q, want empty", got)
+		t.Errorf("unexpected search: got %q, want %q", loaded.Repos[0].Filters.Search, want)
 	}
 }
 
@@ -213,8 +134,7 @@ func TestSaveAndLoadWithIssueSource(t *testing.T) {
 				Name:  "project-issues",
 			},
 			Filters: IssueFilters{
-				Assignee: "@me",
-				State:    "open",
+				Search: "is:open repo:myorg/project-issues",
 			},
 		},
 	}
@@ -241,5 +161,8 @@ func TestSaveAndLoadWithIssueSource(t *testing.T) {
 	}
 	if repo.IssueRepoFullName() != "myorg/project-issues" {
 		t.Errorf("unexpected issue repo: %s", repo.IssueRepoFullName())
+	}
+	if repo.Filters.Search != "is:open repo:myorg/project-issues" {
+		t.Errorf("unexpected search: %s", repo.Filters.Search)
 	}
 }

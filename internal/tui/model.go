@@ -313,7 +313,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// If no search query is set but individual config filters exist,
 		// synthesize a query so the user can see (and edit) what's active.
 		if repo := m.currentRepo(); repo != nil && m.filterInput.Value() == "" {
-			m.filterInput.SetValue(repo.Filters.BuildSearch())
+			m.filterInput.SetValue(repo.Filters.Search)
 		}
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()

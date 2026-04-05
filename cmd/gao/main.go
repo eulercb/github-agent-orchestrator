@@ -93,10 +93,7 @@ func run() error {
 			fmt.Println("  - owner: your-github-username")
 			fmt.Println("    name: your-repo-name")
 			fmt.Println("    filters:")
-			fmt.Println("      assignee: '@me'")
-			fmt.Println("      state: open")
-			fmt.Println("      # Or use a GitHub search query instead:")
-			fmt.Println("      # search: 'is:open assignee:@me archived:false'")
+			fmt.Println("      search: 'is:open assignee:@me repo:org/repo'")
 			fmt.Println()
 			return nil
 		}
@@ -172,17 +169,14 @@ func doInit() error {
 		issueOwner := prompt(scanner, "Issue source repo owner (blank to use same repo)", "")
 		issueName := prompt(scanner, "Issue source repo name (blank to use same repo)", "")
 
-		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
-		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
-		search := prompt(scanner, "GitHub search query (blank to use assignee/state above, e.g. \"is:open assignee:@me archived:false\")", "")
+		defaultSearch := fmt.Sprintf("is:open repo:%s/%s", owner, name)
+		search := prompt(scanner, "Issue filter (GitHub search syntax)", defaultSearch)
 
 		repo := config.RepoConfig{
 			Owner: owner,
 			Name:  name,
 			Filters: config.IssueFilters{
-				Assignee: assignee,
-				State:    state,
-				Search:   search,
+				Search: search,
 			},
 		}
 

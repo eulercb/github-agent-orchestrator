@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -62,40 +61,10 @@ func (r *RepoConfig) IssueRepoFullName() string {
 }
 
 // IssueFilters controls which issues are shown.
-// When Search is set, it is passed to "gh issue list --search" and the individual
-// filter fields (Assignee, Labels, State) are ignored because GitHub's search
-// syntax subsumes them (e.g. "is:open assignee:@me label:bug").
+// Search is passed to "gh search issues" and supports the full GitHub
+// search syntax (e.g. "is:open assignee:@me repo:org/repo label:bug").
 type IssueFilters struct {
-	Assignee string   `yaml:"assignee"`
-	Labels   []string `yaml:"labels"`
-	State    string   `yaml:"state"`
-	Search   string   `yaml:"search,omitempty"`
-}
-
-// BuildSearch synthesizes a GitHub search query from the individual filter
-// fields. Returns the existing Search value if already set, or an empty
-// string if no filters are configured.
-func (f *IssueFilters) BuildSearch() string {
-	if f.Search != "" {
-		return f.Search
-	}
-	var parts []string
-	if f.State != "" && f.State != "all" {
-		parts = append(parts, "is:"+f.State)
-	}
-	if f.Assignee != "" {
-		parts = append(parts, "assignee:"+f.Assignee)
-	}
-	for _, label := range f.Labels {
-		if strings.ContainsAny(label, " \"\\") {
-			escaped := strings.ReplaceAll(label, `\`, `\\`)
-			escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-			parts = append(parts, "label:\""+escaped+"\"")
-		} else {
-			parts = append(parts, "label:"+label)
-		}
-	}
-	return strings.Join(parts, " ")
+	Search string `yaml:"search"`
 }
 
 // SpawnConfig controls how Claude Code sessions are created.

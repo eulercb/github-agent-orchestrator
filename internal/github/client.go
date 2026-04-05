@@ -68,26 +68,15 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-// ListIssues fetches issues with optional filters.
-//
-// When Search is set, "gh search issues" is used so the query can span
-// multiple repos (e.g. "repo:org/a repo:org/b is:open"). The search is
-// not scoped to any single repo — the user controls repo targeting via
-// search qualifiers.
-//
-// When Search is empty, the legacy "gh issue list --repo" path is used
-// with the individual filter fields, scoped to the issue source repo.
+// ListIssues fetches issues using "gh search issues" with the configured
+// search query. The query can span multiple repos via qualifiers like
+// "repo:org/a repo:org/b is:open". Automatically adds "is:issue" if no
+// type qualifier is present.
 func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
-	if repo.Filters.Search != "" {
-		return c.searchIssues(repo.Filters.Search)
+	query := repo.Filters.Search
+	if query == "" {
+		return nil, nil
 	}
-	return c.listRepoIssues(repo)
-}
-
-// searchIssues uses "gh search issues" for cross-repo search.
-// Automatically adds "is:issue" if the query doesn't already contain
-// an issue/PR type qualifier.
-func (c *Client) searchIssues(query string) ([]Issue, error) {
 	if !hasTypeQualifier(query) {
 		query = "is:issue " + query
 	}
@@ -105,37 +94,6 @@ func (c *Client) searchIssues(query string) ([]Issue, error) {
 	var issues []Issue
 	if err := json.Unmarshal(out, &issues); err != nil {
 		return nil, fmt.Errorf("parse search results: %w", err)
-	}
-	return issues, nil
-}
-
-// listRepoIssues uses "gh issue list --repo" for single-repo listing.
-func (c *Client) listRepoIssues(repo *config.RepoConfig) ([]Issue, error) {
-	issueRepo := repo.IssueRepoFullName()
-	args := []string{"issue", "list",
-		"--repo", issueRepo,
-		"--json", "number,title,state,url,labels,assignees,body,author",
-		"--limit", "50",
-	}
-
-	if repo.Filters.Assignee != "" {
-		args = append(args, "--assignee", repo.Filters.Assignee)
-	}
-	if repo.Filters.State != "" {
-		args = append(args, "--state", repo.Filters.State)
-	}
-	for _, label := range repo.Filters.Labels {
-		args = append(args, "--label", label)
-	}
-
-	out, err := runGH(args...)
-	if err != nil {
-		return nil, fmt.Errorf("list issues for %s: %w", issueRepo, err)
-	}
-
-	var issues []Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parse issues: %w", err)
 	}
 	return issues, nil
 }
