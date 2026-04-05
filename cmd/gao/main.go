@@ -27,6 +27,9 @@ func main() {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
 			fmt.Printf("gao v%s\n", version)
+			if cfgPath, err := config.Path(); err == nil {
+				fmt.Printf("config: %s\n", cfgPath)
+			}
 			return
 		case "init":
 			runInit()

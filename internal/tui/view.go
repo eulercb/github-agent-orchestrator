@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
+	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui/styles"
 )
@@ -344,7 +345,12 @@ func (m *Model) renderHelpBar() string {
 }
 
 func (m *Model) viewHelp() string {
-	help := `
+	cfgPath, _ := config.Path()
+	if cfgPath == "" {
+		cfgPath = "~/.config/gao/config.yaml"
+	}
+
+	help := fmt.Sprintf(`
   gao - GitHub Agent Orchestrator
 
   Navigation:
@@ -365,8 +371,9 @@ func (m *Model) viewHelp() string {
     q / Ctrl+C   Quit
 
   Sessions auto-refresh every 10 seconds.
+  Config: %s
   Press Esc to return to dashboard.
-`
+`, cfgPath)
 	width := m.width - 4
 	if width < 0 {
 		width = 0
