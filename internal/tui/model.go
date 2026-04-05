@@ -80,7 +80,6 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 	ti := textinput.New()
 	ti.Placeholder = "is:open assignee:eulercb archived:false"
 	ti.CharLimit = 256
-	ti.Width = 60
 
 	// Pre-populate with the current search filter from config.
 	if len(cfg.Repos) > 0 {
@@ -299,6 +298,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchIssues(), m.refreshStatuses())
 	case key.Matches(msg, m.keys.Filter):
 		m.currentView = ViewFilter
+		// Size the input to fit the bordered box (minus padding and borders).
+		inputWidth := m.width - 10
+		if inputWidth < 20 {
+			inputWidth = 20
+		}
+		m.filterInput.Width = inputWidth
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()
 	}
