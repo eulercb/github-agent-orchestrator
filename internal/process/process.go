@@ -20,7 +20,7 @@ func StartBackground(dir, logFile, name string, args ...string) (int, error) {
 		return 0, fmt.Errorf("create log directory: %w", err)
 	}
 
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // log path is derived from config dir
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) //nolint:gosec // log path is derived from config dir
 	if err != nil {
 		return 0, fmt.Errorf("open log file %q: %w", logFile, err)
 	}
@@ -60,16 +60,18 @@ func IsRunning(pid int) bool {
 }
 
 // Kill sends SIGTERM to the process group for the given PID.
-// It verifies the PGID before sending a group-wide signal to avoid
-// accidentally killing unrelated processes if the PID was reused.
+// It checks whether the PID is still a process-group leader before
+// sending a group-wide signal. This is a best-effort guard against
+// stale PIDs — it reduces but does not fully eliminate the risk of
+// signaling an unrelated process if the PID was reused.
 func Kill(pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid pid %d", pid)
 	}
 
-	// Only target a process group when the PID still resolves to the
-	// expected group leader. This avoids sending a group-wide signal based
-	// solely on a potentially stale stored PID.
+	// Best-effort check: only send a group-wide signal when the PID is
+	// still its own process-group leader. A reused PID could still pass
+	// this check, but it narrows the window compared to blindly signaling.
 	if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
 		if err := syscall.Kill(-pgid, syscall.SIGTERM); err == nil {
 			return nil

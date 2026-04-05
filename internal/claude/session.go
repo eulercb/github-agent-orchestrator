@@ -273,26 +273,19 @@ func (m *Manager) FindByIssue(issueRepo string, issueNumber int) *Session {
 }
 
 func (m *Manager) setupWorktree(repoDir, worktreePath, branch string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-
 	// git fetch origin
-	cmd := exec.CommandContext(ctx, "git", "fetch", "origin")
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git fetch: %s (%w)", strings.TrimSpace(string(out)), err)
+	if out, err := gitRun(repoDir, "fetch", "origin"); err != nil {
+		return fmt.Errorf("git fetch: %s (%w)", out, err)
 	}
 
 	// Determine base branch
 	baseBranch := m.cfg.Spawn.BaseBranch
 	if baseBranch == "" {
-		refCmd := exec.CommandContext(ctx, "git", "symbolic-ref", "refs/remotes/origin/HEAD")
-		refCmd.Dir = repoDir
-		out, err := refCmd.Output()
+		out, err := gitRun(repoDir, "symbolic-ref", "refs/remotes/origin/HEAD")
 		if err != nil {
 			baseBranch = "main"
 		} else {
-			baseBranch = strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/remotes/origin/")
+			baseBranch = strings.TrimPrefix(out, "refs/remotes/origin/")
 		}
 	}
 
@@ -302,43 +295,41 @@ func (m *Manager) setupWorktree(repoDir, worktreePath, branch string) error {
 	}
 
 	// git worktree add
-	wtCmd := exec.CommandContext(ctx, "git", "worktree", "add", worktreePath, "-b", branch, "origin/"+baseBranch)
-	wtCmd.Dir = repoDir
-	if out, err := wtCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree add: %s (%w)", strings.TrimSpace(string(out)), err)
+	if out, err := gitRun(repoDir, "worktree", "add", worktreePath, "-b", branch, "origin/"+baseBranch); err != nil {
+		return fmt.Errorf("git worktree add: %s (%w)", out, err)
 	}
 
 	return nil
 }
 
 func (m *Manager) setupBranch(repoDir, branch string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-
 	// Try checking out existing branch first.
-	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
-	cmd.Dir = repoDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		checkoutOutput := strings.TrimSpace(string(out))
-
+	if out, err := gitRun(repoDir, "checkout", branch); err != nil {
 		// Only create the branch if it truly does not exist locally.
-		verifyCmd := exec.CommandContext(ctx, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
-		verifyCmd.Dir = repoDir
-		if verifyErr := verifyCmd.Run(); verifyErr != nil {
+		if _, verifyErr := gitRun(repoDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); verifyErr != nil {
 			// Branch does not exist — create it.
-			createCmd := exec.CommandContext(ctx, "git", "checkout", "-b", branch)
-			createCmd.Dir = repoDir
-			if createOut, createErr := createCmd.CombinedOutput(); createErr != nil {
-				return fmt.Errorf("git checkout -b %s: %s (%w)", branch, strings.TrimSpace(string(createOut)), createErr)
+			if createOut, createErr := gitRun(repoDir, "checkout", "-b", branch); createErr != nil {
+				return fmt.Errorf("git checkout -b %s: %s (%w)", branch, createOut, createErr)
 			}
 			return nil
 		}
 
 		// Branch exists but checkout failed for another reason (e.g. uncommitted changes).
-		return fmt.Errorf("git checkout %s: %s (%w)", branch, checkoutOutput, err)
+		return fmt.Errorf("git checkout %s: %s (%w)", branch, out, err)
 	}
 
 	return nil
+}
+
+// gitRun executes a git command with a per-command timeout so that a slow
+// fetch doesn't consume the budget for subsequent fast commands.
+func gitRun(dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }
 
 func (m *Manager) loadState() error {

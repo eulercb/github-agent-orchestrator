@@ -139,7 +139,7 @@ The `sessions.yaml` file is the source of truth for tracked sessions. It stores:
 
 ## External tool interfaces
 
-All external tools are called via `exec.Command`. There are no Go libraries wrapping these — the CLIs are the contract.
+All external tools are called via `exec.CommandContext`. There are no Go libraries wrapping these — the CLIs are the contract.
 
 | Tool | Interface | Error handling |
 |------|-----------|----------------|
