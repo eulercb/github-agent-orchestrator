@@ -3,6 +3,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,12 +37,15 @@ func StartBackground(dir, logFile, name string, args ...string) (int, error) {
 		return 0, fmt.Errorf("start process: %w", err)
 	}
 
+	// The child process has inherited the file descriptor, so close the
+	// parent's copy immediately to avoid leaking fds across many sessions.
+	_ = f.Close()
+
 	pid := cmd.Process.Pid
 
 	// Reap the process in the background to avoid zombies.
 	go func() {
 		_ = cmd.Wait()
-		_ = f.Close()
 	}()
 
 	return pid, nil
@@ -64,6 +68,7 @@ func IsRunning(pid int) bool {
 // sending a group-wide signal. This is a best-effort guard against
 // stale PIDs — it reduces but does not fully eliminate the risk of
 // signaling an unrelated process if the PID was reused.
+// If the process is already gone (ESRCH), Kill returns nil.
 func Kill(pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid pid %d", pid)
@@ -73,16 +78,24 @@ func Kill(pid int) error {
 	// still its own process-group leader. A reused PID could still pass
 	// this check, but it narrows the window compared to blindly signaling.
 	if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
-		if err := syscall.Kill(-pgid, syscall.SIGTERM); err == nil {
+		if err := syscall.Kill(-pgid, syscall.SIGTERM); err == nil || isNoSuchProcess(err) {
 			return nil
 		}
 	}
 
 	// Fall back to killing just the process itself.
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		if isNoSuchProcess(err) {
+			return nil
+		}
 		return fmt.Errorf("kill process %d: %w", pid, err)
 	}
 	return nil
+}
+
+// isNoSuchProcess returns true if the error indicates the process no longer exists.
+func isNoSuchProcess(err error) bool {
+	return errors.Is(err, syscall.ESRCH)
 }
 
 // ReadLastLines reads the last n lines from a file by seeking near the end.

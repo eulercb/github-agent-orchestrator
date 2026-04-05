@@ -5,7 +5,103 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestStartBackgroundAndIsRunning(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "test.log")
+
+	pid, err := StartBackground(dir, logFile, "sh", "-c", "sleep 30")
+	if err != nil {
+		t.Fatalf("StartBackground() error: %v", err)
+	}
+	if pid <= 0 {
+		t.Fatalf("StartBackground() returned invalid pid: %d", pid)
+	}
+
+	// Process should be running.
+	if !IsRunning(pid) {
+		t.Errorf("IsRunning(%d) = false, want true", pid)
+	}
+
+	// Kill it and verify it stops.
+	if err := Kill(pid); err != nil {
+		t.Fatalf("Kill(%d) error: %v", pid, err)
+	}
+
+	// Wait briefly for the process to exit.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !IsRunning(pid) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if IsRunning(pid) {
+		t.Errorf("IsRunning(%d) = true after Kill, want false", pid)
+	}
+}
+
+func TestStartBackgroundWritesLog(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "test.log")
+
+	pid, err := StartBackground(dir, logFile, "sh", "-c", "echo hello && echo world")
+	if err != nil {
+		t.Fatalf("StartBackground() error: %v", err)
+	}
+
+	// Wait for the short-lived process to finish.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !IsRunning(pid) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	got, err := ReadLastLines(logFile, 5)
+	if err != nil {
+		t.Fatalf("ReadLastLines() error: %v", err)
+	}
+	if !strings.Contains(got, "hello") || !strings.Contains(got, "world") {
+		t.Errorf("log output = %q, want it to contain 'hello' and 'world'", got)
+	}
+}
+
+func TestKillAlreadyDeadProcess(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "test.log")
+
+	pid, err := StartBackground(dir, logFile, "sh", "-c", "true")
+	if err != nil {
+		t.Fatalf("StartBackground() error: %v", err)
+	}
+
+	// Wait for it to exit on its own.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !IsRunning(pid) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Killing an already-dead process should not return an error.
+	if err := Kill(pid); err != nil {
+		t.Errorf("Kill(%d) on dead process returned error: %v", pid, err)
+	}
+}
+
+func TestIsRunningInvalidPID(t *testing.T) {
+	if IsRunning(0) {
+		t.Error("IsRunning(0) = true, want false")
+	}
+	if IsRunning(-1) {
+		t.Error("IsRunning(-1) = true, want false")
+	}
+}
 
 func TestReadLastLines(t *testing.T) {
 	tests := []struct {

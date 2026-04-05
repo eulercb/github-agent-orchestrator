@@ -70,7 +70,7 @@ When a review comment is valid but too large for the current PR:
 ### Shell command safety
 
 When building shell commands:
-- Use `shellQuote()` / `shellQuoteSession()` for all user-controlled or config-controlled values interpolated into `sh -c` strings
+- Use `shellQuoteSession()` (in `internal/tui/model.go`) for all user-controlled or config-controlled values interpolated into `sh -c` strings
 - The `resolveAttachCommand()` in `model.go` demonstrates this pattern
 
 ## Session management tips
