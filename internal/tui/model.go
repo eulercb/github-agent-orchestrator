@@ -159,8 +159,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		case tea.KeyMsg, tea.WindowSizeMsg:
 			return m.updateFilter(msg)
 		default:
-			// Forward non-key messages to textinput too (cursor blink).
-			m.filterInput, _ = m.filterInput.Update(msg)
+			// Forward non-key messages to textinput (cursor blink, timers).
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			return m, cmd
 		}
 	}
 
@@ -317,10 +319,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			inputWidth = 20
 		}
 		m.filterInput.Width = inputWidth
-		// Pre-populate the editor with the current search query
-		// so the user can review and edit the active filter.
-		if repo := m.currentRepo(); repo != nil && m.filterInput.Value() == "" {
+		// Always sync the editor with the current active search so it
+		// reflects the latest value (even after repo switches or edits).
+		if repo := m.currentRepo(); repo != nil {
 			m.filterInput.SetValue(repo.Filters.Search)
+		} else {
+			m.filterInput.SetValue("")
 		}
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()
