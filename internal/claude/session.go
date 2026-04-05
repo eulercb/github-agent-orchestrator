@@ -351,15 +351,20 @@ func parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
-// issueNumberFromBranch extracts the issue number from a branch like "claude/issue-42".
-// Returns 0 if the branch doesn't match the expected pattern.
+// issueNumberFromBranch extracts the issue number from a branch whose last
+// path component matches "issue-N" (e.g. "claude/issue-42", "issue-7").
+// Returns 0 if no match is found.
 func issueNumberFromBranch(branch string) int {
+	// Use the last path component so the prefix (e.g. "claude/") doesn't matter.
+	base := branch
+	if idx := strings.LastIndex(branch, "/"); idx >= 0 {
+		base = branch[idx+1:]
+	}
 	var num int
-	if _, err := fmt.Sscanf(branch, "claude/issue-%d", &num); err != nil {
+	if _, err := fmt.Sscanf(base, "issue-%d", &num); err != nil {
 		return 0
 	}
-	// Strict match: reject prefixes like "claude/issue-42-extra"
-	if fmt.Sprintf("claude/issue-%d", num) != branch {
+	if fmt.Sprintf("issue-%d", num) != base {
 		return 0
 	}
 	return num

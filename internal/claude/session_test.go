@@ -175,6 +175,8 @@ func TestIssueNumberFromBranch(t *testing.T) {
 		{"claude/issue-42", 42},
 		{"claude/issue-1", 1},
 		{"claude/issue-999", 999},
+		{"issue-7", 7},
+		{"prefix/issue-10", 10},
 		{"claude/issue-42-extra", 0},
 		{"claude/issue-42-suffix", 0},
 		{"main", 0},
