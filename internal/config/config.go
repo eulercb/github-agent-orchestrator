@@ -21,14 +21,43 @@ type Config struct {
 
 // RepoConfig describes a GitHub repository and its issue filters.
 type RepoConfig struct {
-	Owner   string       `yaml:"owner"`
-	Name    string       `yaml:"name"`
-	Filters IssueFilters `yaml:"filters"`
+	Owner       string       `yaml:"owner"`
+	Name        string       `yaml:"name"`
+	IssueSource *IssueSource `yaml:"issue_source,omitempty"`
+	Filters     IssueFilters `yaml:"filters"`
 }
 
-// FullName returns "owner/name".
+// IssueSource specifies a different repository from which to fetch issues.
+// When set, issues are fetched from this repo instead of the main repo.
+type IssueSource struct {
+	Owner string `yaml:"owner"`
+	Name  string `yaml:"name"`
+}
+
+// FullName returns "owner/name" for the PR/session repo.
 func (r *RepoConfig) FullName() string {
 	return r.Owner + "/" + r.Name
+}
+
+// IssueRepoFullName returns the repo to fetch issues from.
+// If IssueSource is configured, non-empty fields override the main repo;
+// otherwise it falls back to the main repo.
+func (r *RepoConfig) IssueRepoFullName() string {
+	if r.IssueSource == nil {
+		return r.FullName()
+	}
+
+	owner := r.Owner
+	name := r.Name
+
+	if r.IssueSource.Owner != "" {
+		owner = r.IssueSource.Owner
+	}
+	if r.IssueSource.Name != "" {
+		name = r.IssueSource.Name
+	}
+
+	return owner + "/" + name
 }
 
 // IssueFilters controls which issues are shown.

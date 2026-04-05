@@ -32,12 +32,22 @@ type Session struct {
 	IssueNumber  int       `yaml:"issue_number"`
 	IssueTitle   string    `yaml:"issue_title"`
 	Repo         string    `yaml:"repo"`
+	IssueRepo    string    `yaml:"issue_repo,omitempty"`
 	Branch       string    `yaml:"branch"`
 	TmuxSession  string    `yaml:"tmux_session"`
 	WorktreePath string    `yaml:"worktree_path"`
 	CreatedAt    time.Time `yaml:"created_at"`
 	Status       Status    `yaml:"status"`
 	LastActivity string    `yaml:"last_activity"`
+}
+
+// IssueRepoName returns the repo the issue was fetched from.
+// Falls back to Repo for backward compatibility with older sessions.
+func (s *Session) IssueRepoName() string {
+	if s.IssueRepo != "" {
+		return s.IssueRepo
+	}
+	return s.Repo
 }
 
 // Manager handles the lifecycle of Claude Code sessions.
@@ -80,8 +90,18 @@ func (m *Manager) Sessions() []Session {
 
 // SpawnSession creates a new Claude Code session for an issue.
 func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTitle string) (*Session, error) {
-	sessionName := fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
-	branch := fmt.Sprintf("claude/issue-%d", issueNumber)
+	var sessionName, branch string
+	if repo.IssueSource != nil && repo.IssueRepoFullName() != repo.FullName() {
+		// Include the effective issue source repo identifier to avoid collisions
+		// when issues come from a different repo than where PRs are opened,
+		// including configurations where IssueSource overrides only the owner.
+		issueRepoID := strings.ReplaceAll(repo.IssueRepoFullName(), "/", "-")
+		sessionName = fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, issueRepoID, issueNumber)
+		branch = fmt.Sprintf("claude/issue-%s-%d", issueRepoID, issueNumber)
+	} else {
+		sessionName = fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
+		branch = fmt.Sprintf("claude/issue-%d", issueNumber)
+	}
 
 	// Check if session already exists
 	if m.tmux.SessionExists(sessionName) {
@@ -153,11 +173,13 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		return nil, fmt.Errorf("send spawn command: %w", err)
 	}
 
+	issueRepo := repo.IssueRepoFullName()
 	sess := Session{
 		ID:           sessionName,
 		IssueNumber:  issueNumber,
 		IssueTitle:   issueTitle,
 		Repo:         repo.FullName(),
+		IssueRepo:    issueRepo,
 		Branch:       branch,
 		TmuxSession:  sessionName,
 		WorktreePath: worktreePath,
@@ -251,12 +273,14 @@ func (m *Manager) RemoveSession(id string, killTmux bool) error {
 }
 
 // FindByIssue finds a session for a specific issue.
-func (m *Manager) FindByIssue(repo string, issueNumber int) *Session {
+// The issueRepo parameter is matched against the session's issue repo
+// (falling back to Repo for backward compatibility with older sessions).
+func (m *Manager) FindByIssue(issueRepo string, issueNumber int) *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	for i := range m.sessions {
-		if m.sessions[i].Repo == repo && m.sessions[i].IssueNumber == issueNumber {
+		if m.sessions[i].IssueRepoName() == issueRepo && m.sessions[i].IssueNumber == issueNumber {
 			sess := m.sessions[i]
 			return &sess
 		}

@@ -72,6 +72,10 @@ func (m *Model) renderTitleBar() string {
 	repoName := "(no repo configured)"
 	if repo := m.currentRepo(); repo != nil {
 		repoName = repo.FullName()
+		issueRepo := repo.IssueRepoFullName()
+		if issueRepo != repo.FullName() {
+			repoName = fmt.Sprintf("%s (issues: %s)", repoName, issueRepo)
+		}
 	}
 
 	left := styles.TitleBar.Render(" gao ")
@@ -134,7 +138,7 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 	repo := m.currentRepo()
 	hasSession := false
 	if repo != nil {
-		if s := m.sessions.FindByIssue(repo.FullName(), issue.Number); s != nil {
+		if s := m.sessions.FindByIssue(repo.IssueRepoFullName(), issue.Number); s != nil {
 			hasSession = true
 		}
 	}

@@ -166,6 +166,9 @@ func doInit() error {
 	name := prompt(scanner, "Repository name", detectedName)
 
 	if owner != "" && name != "" {
+		issueOwner := prompt(scanner, "Issue source repo owner (blank to use same repo)", "")
+		issueName := prompt(scanner, "Issue source repo name (blank to use same repo)", "")
+
 		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
 		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
 
@@ -177,6 +180,24 @@ func doInit() error {
 				State:    state,
 			},
 		}
+
+		// Default blank issue source fields to the main repo values.
+		resolvedIssueOwner := issueOwner
+		if resolvedIssueOwner == "" {
+			resolvedIssueOwner = owner
+		}
+		resolvedIssueName := issueName
+		if resolvedIssueName == "" {
+			resolvedIssueName = name
+		}
+
+		if resolvedIssueOwner != owner || resolvedIssueName != name {
+			repo.IssueSource = &config.IssueSource{
+				Owner: resolvedIssueOwner,
+				Name:  resolvedIssueName,
+			}
+		}
+
 		cfg.Repos = []config.RepoConfig{repo}
 	}
 
