@@ -138,6 +138,11 @@ type sessionKilledMsg struct {
 	err error
 }
 
+type worktreesImportedMsg struct {
+	count int
+	err   error
+}
+
 type openBrowserMsg struct {
 	err error
 }
@@ -259,6 +264,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			}
 		}
 		return m, filterCmd
+	case worktreesImportedMsg:
+		switch {
+		case msg.err != nil:
+			m.errorMsg = fmt.Sprintf("Import worktrees failed: %v", msg.err)
+		case msg.count == 0:
+			m.errorMsg = "No orphan worktrees found"
+		default:
+			m.errorMsg = ""
+			m.activePanel = PanelSessions
+		}
+		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
@@ -334,6 +350,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.attachSession()
 			return m, cmd
 		}
+	case key.Matches(msg, m.keys.ImportWorktrees):
+		cmd := m.importWorktrees()
+		return m, cmd
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd
@@ -666,6 +685,39 @@ func (m *Model) resolveAttachCommand(workDir string) string {
 		spawnCmd = "claude --dangerously-skip-permissions"
 	}
 	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
+}
+
+func (m *Model) importWorktrees() tea.Cmd {
+	repo := m.currentRepo()
+	if repo == nil {
+		m.errorMsg = "No repos configured"
+		return nil
+	}
+	repoCopy := *repo
+	sessMgr := m.sessions
+
+	return func() tea.Msg {
+		orphans, err := sessMgr.ListOrphanWorktrees(&repoCopy)
+		if err != nil {
+			return worktreesImportedMsg{err: err}
+		}
+		if len(orphans) == 0 {
+			return worktreesImportedMsg{count: 0}
+		}
+
+		var imported int
+		for i := range orphans {
+			if _, err := sessMgr.ImportWorktree(&repoCopy, &orphans[i]); err != nil {
+				name := orphans[i].Branch
+				if name == "" {
+					name = orphans[i].Path
+				}
+				return worktreesImportedMsg{count: imported, err: fmt.Errorf("import %s: %w", name, err)}
+			}
+			imported++
+		}
+		return worktreesImportedMsg{count: imported}
+	}
 }
 
 func (m *Model) openInBrowser() tea.Cmd {

@@ -272,6 +272,153 @@ func (m *Manager) FindByIssue(issueRepo string, issueNumber int) *Session {
 	return nil
 }
 
+// Worktree represents a git worktree discovered on disk.
+type Worktree struct {
+	Path   string // Absolute path to the worktree
+	Branch string // Branch checked out in the worktree
+}
+
+// ListOrphanWorktrees returns worktrees under the repo's .worktrees/ directory
+// that are not tracked by any existing session.
+func (m *Manager) ListOrphanWorktrees(repo *config.RepoConfig) ([]Worktree, error) {
+	repoDir := m.cfg.Spawn.RepoDir
+	if repoDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("determine user home directory: %w", err)
+		}
+		repoDir = filepath.Join(home, repo.Name)
+	}
+
+	out, err := gitRun(repoDir, "worktree", "list", "--porcelain")
+	if err != nil {
+		if out != "" {
+			return nil, fmt.Errorf("list worktrees: %s: %w", out, err)
+		}
+		return nil, fmt.Errorf("list worktrees: %w", err)
+	}
+
+	worktrees := parseWorktreeList(out)
+
+	// Filter to only worktrees under .worktrees/ and not already tracked
+	worktreeBase := filepath.Join(repoDir, ".worktrees") + string(filepath.Separator)
+	m.mu.RLock()
+	tracked := make(map[string]bool, len(m.sessions))
+	for i := range m.sessions {
+		tracked[m.sessions[i].WorktreePath] = true
+	}
+	m.mu.RUnlock()
+
+	var orphans []Worktree
+	for _, wt := range worktrees {
+		if !strings.HasPrefix(wt.Path, worktreeBase) {
+			continue
+		}
+		if tracked[wt.Path] {
+			continue
+		}
+		orphans = append(orphans, wt)
+	}
+
+	return orphans, nil
+}
+
+// parseWorktreeList parses the porcelain output of `git worktree list --porcelain`.
+func parseWorktreeList(output string) []Worktree {
+	var worktrees []Worktree
+	var current Worktree
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			current = Worktree{Path: strings.TrimPrefix(line, "worktree ")}
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			current.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+		case line == "":
+			if current.Path != "" {
+				worktrees = append(worktrees, current)
+				current = Worktree{}
+			}
+		}
+	}
+	// Handle last entry if output doesn't end with blank line
+	if current.Path != "" {
+		worktrees = append(worktrees, current)
+	}
+
+	return worktrees
+}
+
+// issueNumberFromBranch extracts the issue number from a branch like "claude/issue-42".
+// Returns 0 if the branch doesn't match the expected pattern.
+func issueNumberFromBranch(branch string) int {
+	var num int
+	if _, err := fmt.Sscanf(branch, "claude/issue-%d", &num); err != nil {
+		return 0
+	}
+	// Strict match: reject prefixes like "claude/issue-42-extra"
+	if fmt.Sprintf("claude/issue-%d", num) != branch {
+		return 0
+	}
+	return num
+}
+
+// ImportWorktree registers an existing worktree as a tracked session without
+// starting a process. The session appears as stopped so the user can attach
+// to it interactively via the existing attach flow.
+func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Session, error) {
+	issueNumber := issueNumberFromBranch(wt.Branch)
+	sessionName := fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
+	if issueNumber == 0 {
+		// Use a sanitized branch name for non-standard branches.
+		// For detached worktrees (empty branch), derive a suffix from the path.
+		safe := strings.NewReplacer("/", "-", ".", "-").Replace(wt.Branch)
+		if safe == "" {
+			safe = filepath.Base(wt.Path)
+		}
+		sessionName = fmt.Sprintf("gao-%s-%s-%s", repo.Owner, repo.Name, safe)
+	}
+
+	// Check if session already exists
+	m.mu.RLock()
+	for i := range m.sessions {
+		if m.sessions[i].ID == sessionName {
+			m.mu.RUnlock()
+			return nil, fmt.Errorf("session %q already exists", sessionName)
+		}
+	}
+	m.mu.RUnlock()
+
+	sess := Session{
+		ID:           sessionName,
+		IssueNumber:  issueNumber,
+		Repo:         repo.FullName(),
+		Branch:       wt.Branch,
+		WorktreePath: wt.Path,
+		CreatedAt:    time.Now(),
+		Status:       StatusStopped,
+	}
+
+	m.mu.Lock()
+	m.sessions = append(m.sessions, sess)
+	m.mu.Unlock()
+
+	if err := m.saveState(); err != nil {
+		m.mu.Lock()
+		for i := len(m.sessions) - 1; i >= 0; i-- {
+			if m.sessions[i].ID == sess.ID {
+				m.sessions = append(m.sessions[:i], m.sessions[i+1:]...)
+				break
+			}
+		}
+		m.mu.Unlock()
+		return nil, fmt.Errorf("save state: %w", err)
+	}
+
+	return &sess, nil
+}
+
 func (m *Manager) setupWorktree(repoDir, worktreePath, branch string) error {
 	// git fetch origin
 	if out, err := gitRun(repoDir, "fetch", "origin"); err != nil {

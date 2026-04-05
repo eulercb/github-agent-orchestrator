@@ -4,19 +4,20 @@ import "github.com/charmbracelet/bubbles/key"
 
 // KeyMap defines all keyboard shortcuts for the TUI.
 type KeyMap struct {
-	Up           key.Binding
-	Down         key.Binding
-	Back         key.Binding
-	Quit         key.Binding
-	Tab          key.Binding
-	Spawn        key.Binding
-	Attach       key.Binding
-	Open         key.Binding
-	Delete       key.Binding
-	ClearSession key.Binding
-	Refresh      key.Binding
-	Help         key.Binding
-	Filter       key.Binding
+	Up              key.Binding
+	Down            key.Binding
+	Back            key.Binding
+	Quit            key.Binding
+	Tab             key.Binding
+	Spawn           key.Binding
+	Attach          key.Binding
+	ImportWorktrees key.Binding
+	Open            key.Binding
+	Delete          key.Binding
+	ClearSession    key.Binding
+	Refresh         key.Binding
+	Help            key.Binding
+	Filter          key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -50,6 +51,10 @@ func DefaultKeyMap() KeyMap {
 		Attach: key.NewBinding(
 			key.WithKeys("a"),
 			key.WithHelp("a", "attach session"),
+		),
+		ImportWorktrees: key.NewBinding(
+			key.WithKeys("w"),
+			key.WithHelp("w", "import worktrees"),
 		),
 		Open: key.NewBinding(
 			key.WithKeys("o"),
