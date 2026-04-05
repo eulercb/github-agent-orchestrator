@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
+	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui/styles"
 )
@@ -22,6 +23,8 @@ func (m Model) View() string { //nolint:gocritic // tea.Model interface requires
 		return m.viewHelp()
 	case ViewConfirm:
 		return m.viewConfirm()
+	case ViewFilter:
+		return m.viewFilter()
 	default:
 		return m.viewDashboard()
 	}
@@ -100,6 +103,40 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	if m.loading {
 		header += styles.MutedText.Render(" (loading...)")
 	}
+	if repo := m.currentRepo(); repo != nil {
+		filterText := repo.Filters.Search
+		if filterText == "" {
+			filterText = config.DefaultSearch
+		}
+		// Reserve space for "  / " prefix (4) + "..." suffix (3) + margin (1).
+		maxFilterLen := m.width - lipgloss.Width(header) - 8
+		if maxFilterLen < 0 {
+			maxFilterLen = 0
+		}
+		filterRunes := []rune(filterText)
+		if len(filterRunes) > maxFilterLen {
+			if maxFilterLen > 0 {
+				filterText = string(filterRunes[:maxFilterLen]) + "..."
+			} else {
+				filterText = ""
+			}
+		}
+		if filterText != "" {
+			header += styles.MutedText.Render("  / " + filterText)
+		}
+	}
+
+	// Determine if issues span multiple repos so we can show repo prefixes.
+	multiRepo := false
+	if len(m.issues) > 1 {
+		first := m.issues[0].Repository.NameWithOwner
+		for i := 1; i < len(m.issues); i++ {
+			if m.issues[i].Repository.NameWithOwner != first {
+				multiRepo = true
+				break
+			}
+		}
+	}
 
 	var lines []string
 	lines = append(lines, header)
@@ -126,19 +163,26 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	for i := start; i < end; i++ {
 		selected := panelActive && i == m.issuesCursor
 
-		line := m.renderIssueLine(&m.issues[i], selected)
+		line := m.renderIssueLine(&m.issues[i], selected, multiRepo)
 		lines = append(lines, line)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
-	// Check if there's an active session for this issue
-	repo := m.currentRepo()
+func (m *Model) renderIssueLine(issue *github.Issue, selected, multiRepo bool) string {
+	// Determine the issue's repo for session lookup.
+	// Search results carry their own Repository; fall back to the config repo.
+	issueRepo := issue.Repository.NameWithOwner
+	if issueRepo == "" {
+		if repo := m.currentRepo(); repo != nil {
+			issueRepo = repo.IssueRepoFullName()
+		}
+	}
+
 	hasSession := false
-	if repo != nil {
-		if s := m.sessions.FindByIssue(repo.IssueRepoFullName(), issue.Number); s != nil {
+	if issueRepo != "" {
+		if s := m.sessions.FindByIssue(issueRepo, issue.Number); s != nil {
 			hasSession = true
 		}
 	}
@@ -148,9 +192,15 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 		indicator = "● "
 	}
 
+	// Show repo name only when results span multiple repos.
+	repoPrefix := ""
+	if multiRepo && issue.Repository.NameWithOwner != "" {
+		repoPrefix = styles.MutedText.Render(issue.Repository.NameWithOwner) + " "
+	}
+
 	number := fmt.Sprintf("#%-5d", issue.Number)
 	title := issue.Title
-	maxTitleLen := m.width - 33
+	maxTitleLen := m.width - 33 - lipgloss.Width(repoPrefix)
 	if maxTitleLen < 0 {
 		maxTitleLen = 0
 	}
@@ -168,7 +218,7 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 		labelStr = styles.MutedText.Render(" [" + strings.Join(labels, ", ") + "]")
 	}
 
-	content := fmt.Sprintf("%s%s %s%s", indicator, number, title, labelStr)
+	content := fmt.Sprintf("%s%s%s %s%s", indicator, repoPrefix, number, title, labelStr)
 
 	if selected {
 		return styles.SelectedItem.Width(m.width).Render(content)
@@ -315,15 +365,20 @@ func (m *Model) renderStatusBar() string {
 func (m *Model) renderHelpBar() string {
 	var items []string
 	if m.activePanel == PanelIssues {
-		items = []string{"↑↓ navigate", "tab switch", "s spawn", "o open", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "o open", "r refresh", "? help", "q quit"}
 	} else {
-		items = []string{"↑↓ navigate", "tab switch", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
 
 func (m *Model) viewHelp() string {
-	help := `
+	cfgPath := m.cfgPath
+	if cfgPath == "" {
+		cfgPath = "(unknown)"
+	}
+
+	help := fmt.Sprintf(`
   gao - GitHub Agent Orchestrator
 
   Navigation:
@@ -332,6 +387,7 @@ func (m *Model) viewHelp() string {
     Esc          Go back
 
   Actions:
+    /            Edit issue filter (GitHub search syntax)
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
     o            Open issue/PR in browser
@@ -343,13 +399,24 @@ func (m *Model) viewHelp() string {
     q / Ctrl+C   Quit
 
   Sessions auto-refresh every 10 seconds.
+  Config: %s
   Press Esc to return to dashboard.
-`
+`, cfgPath)
 	width := m.width - 4
 	if width < 0 {
 		width = 0
 	}
 	return styles.BorderedBox.Width(width).Render(help)
+}
+
+func (m *Model) viewFilter() string {
+	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:@me  label:bug  repo:org/repo  user:my-org\n",
+		m.filterInput.View())
+	width := m.width - 4
+	if width < 0 {
+		width = 0
+	}
+	return styles.BorderedBox.Width(width).Render(content)
 }
 
 func (m *Model) viewConfirm() string {

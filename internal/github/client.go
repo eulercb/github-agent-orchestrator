@@ -14,14 +14,20 @@ import (
 
 // Issue represents a GitHub issue.
 type Issue struct {
-	Number    int     `json:"number"`
-	Title     string  `json:"title"`
-	State     string  `json:"state"`
-	URL       string  `json:"url"`
-	Labels    []Label `json:"labels"`
-	Assignees []User  `json:"assignees"`
-	Body      string  `json:"body"`
-	Author    User    `json:"author"`
+	Number     int        `json:"number"`
+	Title      string     `json:"title"`
+	State      string     `json:"state"`
+	URL        string     `json:"url"`
+	Labels     []Label    `json:"labels"`
+	Assignees  []User     `json:"assignees"`
+	Body       string     `json:"body"`
+	Author     User       `json:"author"`
+	Repository Repository `json:"repository"`
+}
+
+// Repository identifies a GitHub repository in search results.
+type Repository struct {
+	NameWithOwner string `json:"nameWithOwner"`
 }
 
 // Label represents a GitHub label.
@@ -62,37 +68,80 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-// ListIssues fetches issues for a repo with optional filters.
-// Issues are fetched from the issue source repo if configured,
-// otherwise from the main repo.
-func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
-	issueRepo := repo.IssueRepoFullName()
-	args := []string{"issue", "list",
-		"--repo", issueRepo,
-		"--json", "number,title,state,url,labels,assignees,body,author",
+// ListIssues fetches issues using "gh search issues" with the given search
+// query. The query can span multiple repos via qualifiers like
+// "repo:org/a repo:org/b is:open". Automatically adds "is:issue" if no
+// type qualifier is present. No repo scoping is applied beyond what the
+// query itself contains.
+func (c *Client) ListIssues(search string) ([]Issue, error) {
+	query := search
+	if query == "" {
+		query = config.DefaultSearch
+	}
+	if !hasTypeQualifier(query) {
+		query = "is:issue " + query
+	}
+	// Split the query into individual terms so each qualifier is passed as
+	// a separate positional argument to gh (gh search issues is:open is:issue ...)
+	// rather than a single quoted string. Quoted segments like
+	// label:"good first issue" are preserved as a single argument.
+	args := []string{"search", "issues"}
+	args = append(args, splitQuery(query)...)
+	args = append(args,
+		"--json", "number,title,state,url,labels,assignees,body,author,repository",
 		"--limit", "50",
-	}
-
-	if repo.Filters.Assignee != "" {
-		args = append(args, "--assignee", repo.Filters.Assignee)
-	}
-	if repo.Filters.State != "" {
-		args = append(args, "--state", repo.Filters.State)
-	}
-	for _, label := range repo.Filters.Labels {
-		args = append(args, "--label", label)
-	}
+	)
 
 	out, err := runGH(args...)
 	if err != nil {
-		return nil, fmt.Errorf("list issues for %s: %w", issueRepo, err)
+		return nil, fmt.Errorf("search issues: %w", err)
 	}
 
 	var issues []Issue
 	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parse issues: %w", err)
+		return nil, fmt.Errorf("parse search results: %w", err)
 	}
 	return issues, nil
+}
+
+// splitQuery splits a search query into tokens, preserving quoted segments.
+// For example: `is:open label:"good first issue" assignee:@me` becomes
+// ["is:open", `label:"good first issue"`, "assignee:@me"].
+func splitQuery(query string) []string {
+	var tokens []string
+	var current strings.Builder
+	inQuote := false
+
+	for _, r := range query {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+			current.WriteRune(r)
+		case r == ' ' && !inQuote:
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
+}
+
+// hasTypeQualifier returns true if the query already contains a qualifier
+// that distinguishes issues from PRs (e.g. "is:issue", "is:pr", "type:issue").
+func hasTypeQualifier(query string) bool {
+	lower := strings.ToLower(query)
+	for _, q := range []string{"is:issue", "is:pr", "type:issue", "type:pr"} {
+		if strings.Contains(lower, q) {
+			return true
+		}
+	}
+	return false
 }
 
 // FindPRForBranch looks for a PR with the given head branch.

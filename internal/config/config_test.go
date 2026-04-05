@@ -48,9 +48,7 @@ func TestSaveAndLoad(t *testing.T) {
 			Owner: "testowner",
 			Name:  "testrepo",
 			Filters: IssueFilters{
-				Assignee: "@me",
-				Labels:   []string{"bug"},
-				State:    "open",
+				Search: "is:open assignee:@me repo:testowner/testrepo",
 			},
 		},
 	}
@@ -77,11 +75,9 @@ func TestSaveAndLoad(t *testing.T) {
 	if loaded.Repos[0].FullName() != "testowner/testrepo" {
 		t.Errorf("unexpected repo: %s", loaded.Repos[0].FullName())
 	}
-	if loaded.Repos[0].Filters.Assignee != "@me" {
-		t.Errorf("unexpected assignee: %s", loaded.Repos[0].Filters.Assignee)
-	}
-	if len(loaded.Repos[0].Filters.Labels) != 1 || loaded.Repos[0].Filters.Labels[0] != "bug" {
-		t.Errorf("unexpected labels: %v", loaded.Repos[0].Filters.Labels)
+	want := "is:open assignee:@me repo:testowner/testrepo"
+	if loaded.Repos[0].Filters.Search != want {
+		t.Errorf("unexpected search: got %q, want %q", loaded.Repos[0].Filters.Search, want)
 	}
 }
 
@@ -138,8 +134,7 @@ func TestSaveAndLoadWithIssueSource(t *testing.T) {
 				Name:  "project-issues",
 			},
 			Filters: IssueFilters{
-				Assignee: "@me",
-				State:    "open",
+				Search: "is:open repo:myorg/project-issues",
 			},
 		},
 	}
@@ -166,5 +161,8 @@ func TestSaveAndLoadWithIssueSource(t *testing.T) {
 	}
 	if repo.IssueRepoFullName() != "myorg/project-issues" {
 		t.Errorf("unexpected issue repo: %s", repo.IssueRepoFullName())
+	}
+	if repo.Filters.Search != "is:open repo:myorg/project-issues" {
+		t.Errorf("unexpected search: %s", repo.Filters.Search)
 	}
 }

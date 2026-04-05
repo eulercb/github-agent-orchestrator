@@ -27,6 +27,9 @@ func main() {
 		switch os.Args[1] {
 		case "version", "--version", "-v":
 			fmt.Printf("gao v%s\n", version)
+			if cfgPath, err := config.Path(); err == nil {
+				fmt.Printf("config: %s\n", cfgPath)
+			}
 			return
 		case "init":
 			runInit()
@@ -90,8 +93,7 @@ func run() error {
 			fmt.Println("  - owner: your-github-username")
 			fmt.Println("    name: your-repo-name")
 			fmt.Println("    filters:")
-			fmt.Println("      assignee: '@me'")
-			fmt.Println("      state: open")
+			fmt.Println("      search: 'is:open assignee:@me repo:org/repo'")
 			fmt.Println()
 			return nil
 		}
@@ -164,36 +166,14 @@ func doInit() error {
 	name := prompt(scanner, "Repository name", detectedName)
 
 	if owner != "" && name != "" {
-		issueOwner := prompt(scanner, "Issue source repo owner (blank to use same repo)", "")
-		issueName := prompt(scanner, "Issue source repo name (blank to use same repo)", "")
-
-		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
-		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
+		search := prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultSearch)
 
 		repo := config.RepoConfig{
 			Owner: owner,
 			Name:  name,
 			Filters: config.IssueFilters{
-				Assignee: assignee,
-				State:    state,
+				Search: search,
 			},
-		}
-
-		// Default blank issue source fields to the main repo values.
-		resolvedIssueOwner := issueOwner
-		if resolvedIssueOwner == "" {
-			resolvedIssueOwner = owner
-		}
-		resolvedIssueName := issueName
-		if resolvedIssueName == "" {
-			resolvedIssueName = name
-		}
-
-		if resolvedIssueOwner != owner || resolvedIssueName != name {
-			repo.IssueSource = &config.IssueSource{
-				Owner: resolvedIssueOwner,
-				Name:  resolvedIssueName,
-			}
 		}
 
 		cfg.Repos = []config.RepoConfig{repo}
@@ -251,6 +231,7 @@ Config: ~/.config/gao/config.yaml
 Dashboard controls:
   ↑↓/jk           Navigate
   Tab              Switch panels (Issues ↔ Sessions)
+  /                Edit issue filter (GitHub search syntax)
   s                Spawn Claude Code session for selected issue
   a                Attach to selected session
   o                Open issue/PR in browser

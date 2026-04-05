@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
@@ -34,6 +35,7 @@ const (
 	ViewDashboard View = iota
 	ViewHelp
 	ViewConfirm
+	ViewFilter
 )
 
 // prCacheKey builds a unique key for the PR cache from repo and branch.
@@ -49,6 +51,7 @@ type Model struct {
 	statusProv    *statusbar.Provider
 	keys          KeyMap
 	width, height int
+	cfgPath       string
 
 	// State
 	currentView   View
@@ -63,6 +66,7 @@ type Model struct {
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
+	filterInput   textinput.Model
 }
 
 // NewModel creates the initial TUI model.
@@ -74,13 +78,26 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		sbCmd = cfg.CCUsage.Command
 	}
 
+	ti := textinput.New()
+	ti.Placeholder = config.DefaultSearch
+	ti.CharLimit = 256
+
+	// Pre-populate with the current search filter from config.
+	if len(cfg.Repos) > 0 {
+		ti.SetValue(cfg.Repos[0].Filters.Search)
+	}
+
+	cfgPath, _ := config.Path()
+
 	return Model{
-		cfg:        cfg,
-		gh:         ghClient,
-		sessions:   sessMgr,
-		statusProv: statusbar.NewProvider(sbCmd, nil),
-		keys:       DefaultKeyMap(),
-		prCache:    make(map[string]*github.PullRequest),
+		cfg:         cfg,
+		gh:          ghClient,
+		sessions:    sessMgr,
+		statusProv:  statusbar.NewProvider(sbCmd, nil),
+		keys:        DefaultKeyMap(),
+		prCache:     make(map[string]*github.PullRequest),
+		filterInput: ti,
+		cfgPath:     cfgPath,
 	}
 }
 
@@ -133,13 +150,29 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
+	// When the filter input is active, intercept key events and window
+	// resizes for the filter editor. All other messages (ticks, async
+	// loads, status updates) fall through to the main switch so background
+	// refreshes continue and ticks are rescheduled.
+	var filterCmd tea.Cmd
+	if m.currentView == ViewFilter {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg:
+			return m.updateFilter(msg)
+		default:
+			// Forward to textinput for cursor blink / internal timers,
+			// then fall through to the main switch below.
+			m.filterInput, filterCmd = m.filterInput.Update(msg)
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
+		return m, filterCmd
 	case issuesLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -157,7 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			}
 		}
 		cmd := m.fetchPRs()
-		return m, cmd
+		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
@@ -169,14 +202,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.prCache = msg.prs
 			m.errorMsg = ""
 		}
-		return m, nil
+		return m, filterCmd
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.refreshStatusBar()
-		return m, cmd
+		return m, tea.Batch(filterCmd, cmd)
 	case statusBarUpdatedMsg:
 		m.statusBarText = msg.text
-		return m, nil
+		return m, filterCmd
 	case sessionSpawnedMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Spawn failed: %v", msg.err)
@@ -184,7 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.errorMsg = ""
 			m.activePanel = PanelSessions
 		}
-		return m, nil
+		return m, filterCmd
 	case sessionKilledMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Kill failed: %v", msg.err)
@@ -199,21 +232,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 				m.sessionCursor = lastIdx
 			}
 		}
-		return m, nil
+		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
 		}
-		return m, nil
+		return m, filterCmd
 	case tickMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.fetchPRs()
-		return m, tea.Batch(m.tickCmd(), cmd, m.refreshStatusBar())
+		return m, tea.Batch(filterCmd, m.tickCmd(), cmd, m.refreshStatusBar())
 	case errMsg:
 		m.errorMsg = msg.err.Error()
-		return m, nil
+		return m, filterCmd
 	}
-	return m, nil
+	return m, filterCmd
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -278,8 +311,72 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
 		return m, tea.Batch(m.fetchIssues(), m.refreshStatuses())
+	case key.Matches(msg, m.keys.Filter):
+		m.currentView = ViewFilter
+		// Size the input to fit the bordered box (minus padding and borders).
+		inputWidth := m.width - 10
+		if inputWidth < 20 {
+			inputWidth = 20
+		}
+		m.filterInput.Width = inputWidth
+		// Always sync the editor with the current active search so it
+		// reflects the latest value (even after repo switches or edits).
+		if repo := m.currentRepo(); repo != nil {
+			m.filterInput.SetValue(repo.Filters.Search)
+		} else {
+			m.filterInput.SetValue("")
+		}
+		m.filterInput.Focus()
+		return m, m.filterInput.Cursor.BlinkCmd()
 	}
 	return m, nil
+}
+
+// updateFilter handles all messages while the filter editor is active.
+// Enter applies the filter, Esc cancels, window resizes update width,
+// and everything else (including cursor blink) is forwarded to the
+// textinput so it stays functional.
+func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			return m, tea.Quit
+		case tea.KeyEnter:
+			// Apply the filter and refresh issues.
+			m.currentView = ViewDashboard
+			m.filterInput.Blur()
+			query := strings.TrimSpace(m.filterInput.Value())
+			repo := m.currentRepo()
+			if repo != nil {
+				repo.Filters.Search = query
+			}
+			m.loading = true
+			m.issuesCursor = 0
+			cmd := m.fetchIssues()
+			return m, cmd
+		case tea.KeyEsc:
+			// Cancel: restore the previous value.
+			m.currentView = ViewDashboard
+			m.filterInput.Blur()
+			if repo := m.currentRepo(); repo != nil {
+				m.filterInput.SetValue(repo.Filters.Search)
+			}
+			return m, nil
+		}
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		inputWidth := m.width - 10
+		if inputWidth < 20 {
+			inputWidth = 20
+		}
+		m.filterInput.Width = inputWidth
+	}
+
+	var cmd tea.Cmd
+	m.filterInput, cmd = m.filterInput.Update(msg)
+	return m, cmd
 }
 
 func (m *Model) moveCursor(delta int) {
@@ -342,7 +439,7 @@ func (m *Model) fetchIssues() tea.Cmd {
 		if repo == nil {
 			return issuesLoadedMsg{err: fmt.Errorf("no repos configured")}
 		}
-		issues, err := m.gh.ListIssues(repo)
+		issues, err := m.gh.ListIssues(repo.Filters.Search)
 		return issuesLoadedMsg{issues: issues, err: err}
 	}
 }
@@ -383,8 +480,14 @@ func (m *Model) spawnSession() tea.Cmd {
 		return nil
 	}
 
+	// Use the issue's own repo when available (search results carry it).
+	issueRepo := issue.Repository.NameWithOwner
+	if issueRepo == "" {
+		issueRepo = repo.IssueRepoFullName()
+	}
+
 	// Check if session already exists for this issue
-	existing := m.sessions.FindByIssue(repo.IssueRepoFullName(), issue.Number)
+	existing := m.sessions.FindByIssue(issueRepo, issue.Number)
 	if existing != nil {
 		m.errorMsg = fmt.Sprintf("Session already exists for issue #%d", issue.Number)
 		return nil
@@ -393,6 +496,18 @@ func (m *Model) spawnSession() tea.Cmd {
 	issueNum := issue.Number
 	issueTitle := issue.Title
 	repoCopy := *repo
+
+	// Override issue source so the session records the issue's actual repo,
+	// not the default config repo (matters for cross-repo search results).
+	if issueRepo != repo.IssueRepoFullName() {
+		parts := strings.SplitN(issueRepo, "/", 2)
+		if len(parts) == 2 {
+			repoCopy.IssueSource = &config.IssueSource{
+				Owner: parts[0],
+				Name:  parts[1],
+			}
+		}
+	}
 
 	return func() tea.Msg {
 		sess, err := m.sessions.SpawnSession(&repoCopy, issueNum, issueTitle)
