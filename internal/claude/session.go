@@ -278,9 +278,10 @@ type Worktree struct {
 	Branch string // Branch checked out in the worktree
 }
 
-// ListOrphanWorktrees returns worktrees under the repo's .worktrees/ directory
-// that are not tracked by any existing session.
-func (m *Manager) ListOrphanWorktrees(repo *config.RepoConfig) ([]Worktree, error) {
+// ListUntrackedWorktrees returns worktrees under the repo's .worktrees/
+// directory that are not yet associated with any session. These follow the
+// Claude Code worktree convention and can be imported as sessions.
+func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, error) {
 	repoDir := m.cfg.Spawn.RepoDir
 	if repoDir == "" {
 		home, err := os.UserHomeDir()
@@ -309,7 +310,7 @@ func (m *Manager) ListOrphanWorktrees(repo *config.RepoConfig) ([]Worktree, erro
 	}
 	m.mu.RUnlock()
 
-	var orphans []Worktree
+	var untracked []Worktree
 	for _, wt := range worktrees {
 		if !strings.HasPrefix(wt.Path, worktreeBase) {
 			continue
@@ -317,10 +318,10 @@ func (m *Manager) ListOrphanWorktrees(repo *config.RepoConfig) ([]Worktree, erro
 		if tracked[wt.Path] {
 			continue
 		}
-		orphans = append(orphans, wt)
+		untracked = append(untracked, wt)
 	}
 
-	return orphans, nil
+	return untracked, nil
 }
 
 // parseWorktreeList parses the porcelain output of `git worktree list --porcelain`.

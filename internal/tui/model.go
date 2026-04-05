@@ -269,10 +269,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		case msg.err != nil:
 			m.errorMsg = fmt.Sprintf("Import worktrees failed: %v", msg.err)
 		case msg.count == 0:
-			m.errorMsg = "No orphan worktrees found"
+			m.errorMsg = "No untracked worktrees found"
 		default:
 			m.errorMsg = ""
 			m.activePanel = PanelSessions
+			// Fetch PRs for newly imported sessions so branch→PR association shows up.
+			return m, tea.Batch(filterCmd, m.fetchPRs())
 		}
 		return m, filterCmd
 	case openBrowserMsg:
@@ -697,7 +699,7 @@ func (m *Model) importWorktrees() tea.Cmd {
 	sessMgr := m.sessions
 
 	return func() tea.Msg {
-		orphans, err := sessMgr.ListOrphanWorktrees(&repoCopy)
+		orphans, err := sessMgr.ListUntrackedWorktrees(&repoCopy)
 		if err != nil {
 			return worktreesImportedMsg{err: err}
 		}

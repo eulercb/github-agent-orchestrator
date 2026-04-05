@@ -533,7 +533,7 @@ func (m *Model) viewHelp() string {
     /            Edit issue filter (GitHub search syntax)
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
-    w            Import orphan worktrees as sessions
+    w            Import worktrees as sessions (with PR association)
     o            Open issue/PR in browser
     x            Kill selected session
     c            Clear session for selected PR (in PRs panel)
