@@ -85,6 +85,40 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadWithSearch(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := DefaultConfig()
+	cfg.Repos = []RepoConfig{
+		{
+			Owner: "testowner",
+			Name:  "testrepo",
+			Filters: IssueFilters{
+				Search: "is:open assignee:eulercb archived:false user:my-company",
+			},
+		},
+	}
+
+	if err := Save(&cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if len(loaded.Repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(loaded.Repos))
+	}
+
+	want := "is:open assignee:eulercb archived:false user:my-company"
+	if loaded.Repos[0].Filters.Search != want {
+		t.Errorf("unexpected search filter: got %q, want %q", loaded.Repos[0].Filters.Search, want)
+	}
+}
+
 func TestRepoFullName(t *testing.T) {
 	r := RepoConfig{Owner: "foo", Name: "bar"}
 	if r.FullName() != "foo/bar" {

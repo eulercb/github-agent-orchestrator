@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,23 @@ import (
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui"
 )
+
+// cliFilters holds issue filter overrides from CLI flags.
+type cliFilters struct {
+	assignee string
+	state    string
+	labels   stringSlice
+	search   string
+}
+
+// stringSlice implements flag.Value for repeatable -label flags.
+type stringSlice []string
+
+func (s *stringSlice) String() string { return strings.Join(*s, ",") }
+func (s *stringSlice) Set(val string) error {
+	*s = append(*s, val)
+	return nil
+}
 
 // version is set at build time via -ldflags "-X main.version=...".
 // Falls back to "dev" for local builds without ldflags.
@@ -37,13 +55,26 @@ func main() {
 		}
 	}
 
-	if err := run(); err != nil {
+	var filters cliFilters
+	fs := flag.NewFlagSet("gao", flag.ExitOnError)
+	fs.StringVar(&filters.assignee, "assignee", "", "filter issues by assignee (overrides config)")
+	fs.StringVar(&filters.state, "state", "", "filter issues by state: open, closed, all (overrides config)")
+	fs.Var(&filters.labels, "label", "filter issues by label (repeatable, overrides config)")
+	fs.StringVar(&filters.search, "search", "", "GitHub search query, e.g. \"is:open assignee:me archived:false\" (overrides all other filters)")
+
+	// Parse flags, skipping os.Args[0] (the binary name).
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := run(&filters); err != nil {
 		fmt.Fprintf(os.Stderr, "gao: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(filters *cliFilters) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -92,6 +123,8 @@ func run() error {
 			fmt.Println("    filters:")
 			fmt.Println("      assignee: '@me'")
 			fmt.Println("      state: open")
+			fmt.Println("      # Or use a GitHub search query instead:")
+			fmt.Println("      # search: 'is:open assignee:eulercb archived:false'")
 			fmt.Println()
 			return nil
 		}
@@ -99,6 +132,9 @@ func run() error {
 		fmt.Println("Initialization complete! Starting dashboard...")
 		fmt.Println()
 	}
+
+	// Apply CLI filter overrides to all configured repos.
+	applyFilterOverrides(&cfg, filters)
 
 	ghClient := github.NewClient()
 
@@ -115,6 +151,29 @@ func run() error {
 	}
 
 	return nil
+}
+
+// applyFilterOverrides merges CLI flags into every repo's filter config.
+// CLI flags take precedence over values from the config file.
+func applyFilterOverrides(cfg *config.Config, filters *cliFilters) {
+	if filters == nil {
+		return
+	}
+
+	for i := range cfg.Repos {
+		if filters.search != "" {
+			cfg.Repos[i].Filters.Search = filters.search
+		}
+		if filters.assignee != "" {
+			cfg.Repos[i].Filters.Assignee = filters.assignee
+		}
+		if filters.state != "" {
+			cfg.Repos[i].Filters.State = filters.state
+		}
+		if len(filters.labels) > 0 {
+			cfg.Repos[i].Filters.Labels = filters.labels
+		}
+	}
 }
 
 func runInit() {
@@ -169,6 +228,7 @@ func doInit() error {
 
 		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
 		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
+		search := prompt(scanner, "GitHub search query (blank to use assignee/state above, e.g. \"is:open assignee:eulercb archived:false\")", "")
 
 		repo := config.RepoConfig{
 			Owner: owner,
@@ -176,6 +236,7 @@ func doInit() error {
 			Filters: config.IssueFilters{
 				Assignee: assignee,
 				State:    state,
+				Search:   search,
 			},
 		}
 
@@ -241,10 +302,17 @@ func printUsage() {
 	fmt.Printf(`gao - GitHub Agent Orchestrator v%s
 
 Usage:
-  gao              Launch the dashboard
+  gao [flags]      Launch the dashboard
   gao init         Create a default config file
   gao version      Show version
   gao help         Show this help
+
+Flags (override config file filters):
+  --assignee NAME  Filter issues by assignee (@me for yourself)
+  --state STATE    Filter by state: open, closed, all
+  --label LABEL    Filter by label (repeatable)
+  --search QUERY   GitHub search query (overrides assignee/state/label)
+                   e.g. "is:open assignee:eulercb archived:false user:my-company"
 
 Config: ~/.config/gao/config.yaml
 

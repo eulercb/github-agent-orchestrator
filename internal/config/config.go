@@ -61,10 +61,14 @@ func (r *RepoConfig) IssueRepoFullName() string {
 }
 
 // IssueFilters controls which issues are shown.
+// When Search is set, it is passed to "gh issue list -S" and the individual
+// filter fields (Assignee, Labels, State) are ignored because GitHub's search
+// syntax subsumes them (e.g. "is:open assignee:eulercb label:bug").
 type IssueFilters struct {
 	Assignee string   `yaml:"assignee"`
 	Labels   []string `yaml:"labels"`
 	State    string   `yaml:"state"`
+	Search   string   `yaml:"search,omitempty"`
 }
 
 // SpawnConfig controls how Claude Code sessions are created.

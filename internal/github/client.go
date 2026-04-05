@@ -65,6 +65,10 @@ func NewClient() *Client {
 // ListIssues fetches issues for a repo with optional filters.
 // Issues are fetched from the issue source repo if configured,
 // otherwise from the main repo.
+//
+// When Search is set, it is passed as a raw GitHub search query via
+// "gh issue list --search" and the individual filter fields are ignored,
+// because GitHub search syntax subsumes them (e.g. "is:open assignee:me").
 func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 	issueRepo := repo.IssueRepoFullName()
 	args := []string{"issue", "list",
@@ -73,14 +77,20 @@ func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 		"--limit", "50",
 	}
 
-	if repo.Filters.Assignee != "" {
-		args = append(args, "--assignee", repo.Filters.Assignee)
-	}
-	if repo.Filters.State != "" {
-		args = append(args, "--state", repo.Filters.State)
-	}
-	for _, label := range repo.Filters.Labels {
-		args = append(args, "--label", label)
+	if repo.Filters.Search != "" {
+		// Raw search query mode: pass the query directly and set state
+		// to "all" so gh doesn't add its own implicit "is:open" filter.
+		args = append(args, "--search", repo.Filters.Search, "--state", "all")
+	} else {
+		if repo.Filters.Assignee != "" {
+			args = append(args, "--assignee", repo.Filters.Assignee)
+		}
+		if repo.Filters.State != "" {
+			args = append(args, "--state", repo.Filters.State)
+		}
+		for _, label := range repo.Filters.Labels {
+			args = append(args, "--label", label)
+		}
 	}
 
 	out, err := runGH(args...)
