@@ -156,11 +156,18 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 }
 
 func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
-	// Check if there's an active session for this issue
-	repo := m.currentRepo()
+	// Determine the issue's repo for session lookup.
+	// Search results carry their own Repository; fall back to the config repo.
+	issueRepo := issue.Repository.NameWithOwner
+	if issueRepo == "" {
+		if repo := m.currentRepo(); repo != nil {
+			issueRepo = repo.IssueRepoFullName()
+		}
+	}
+
 	hasSession := false
-	if repo != nil {
-		if s := m.sessions.FindByIssue(repo.IssueRepoFullName(), issue.Number); s != nil {
+	if issueRepo != "" {
+		if s := m.sessions.FindByIssue(issueRepo, issue.Number); s != nil {
 			hasSession = true
 		}
 	}
@@ -170,9 +177,18 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 		indicator = "● "
 	}
 
+	// Show repo name when issues come from search (multi-repo).
+	repoPrefix := ""
+	if issue.Repository.NameWithOwner != "" {
+		repoPrefix = styles.MutedText.Render(issue.Repository.NameWithOwner) + " "
+	}
+
 	number := fmt.Sprintf("#%-5d", issue.Number)
 	title := issue.Title
-	maxTitleLen := m.width - 33
+	maxTitleLen := m.width - 33 - len([]rune(issue.Repository.NameWithOwner))
+	if repoPrefix != "" {
+		maxTitleLen -= 1 // space after repo name
+	}
 	if maxTitleLen < 0 {
 		maxTitleLen = 0
 	}
@@ -190,7 +206,7 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 		labelStr = styles.MutedText.Render(" [" + strings.Join(labels, ", ") + "]")
 	}
 
-	content := fmt.Sprintf("%s%s %s%s", indicator, number, title, labelStr)
+	content := fmt.Sprintf("%s%s%s %s%s", indicator, repoPrefix, number, title, labelStr)
 
 	if selected {
 		return styles.SelectedItem.Width(m.width).Render(content)
@@ -382,7 +398,7 @@ func (m *Model) viewHelp() string {
 }
 
 func (m *Model) viewFilter() string {
-	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:@me  label:bug  archived:false  user:my-org\n",
+	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:@me  label:bug  repo:org/repo  user:my-org\n",
 		m.filterInput.View())
 	width := m.width - 4
 	if width < 0 {

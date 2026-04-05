@@ -14,14 +14,20 @@ import (
 
 // Issue represents a GitHub issue.
 type Issue struct {
-	Number    int     `json:"number"`
-	Title     string  `json:"title"`
-	State     string  `json:"state"`
-	URL       string  `json:"url"`
-	Labels    []Label `json:"labels"`
-	Assignees []User  `json:"assignees"`
-	Body      string  `json:"body"`
-	Author    User    `json:"author"`
+	Number     int        `json:"number"`
+	Title      string     `json:"title"`
+	State      string     `json:"state"`
+	URL        string     `json:"url"`
+	Labels     []Label    `json:"labels"`
+	Assignees  []User     `json:"assignees"`
+	Body       string     `json:"body"`
+	Author     User       `json:"author"`
+	Repository Repository `json:"repository"`
+}
+
+// Repository identifies a GitHub repository in search results.
+type Repository struct {
+	NameWithOwner string `json:"nameWithOwner"`
 }
 
 // Label represents a GitHub label.
@@ -62,14 +68,49 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-// ListIssues fetches issues for a repo with optional filters.
-// Issues are fetched from the issue source repo if configured,
-// otherwise from the main repo.
+// ListIssues fetches issues with optional filters.
 //
-// When Search is set, it is passed as a raw GitHub search query via
-// "gh issue list --search" and the individual filter fields are ignored,
-// because GitHub search syntax subsumes them (e.g. "is:open assignee:me").
+// When Search is set, "gh search issues" is used so the query can span
+// multiple repos (e.g. "repo:org/a repo:org/b is:open"). The search is
+// not scoped to any single repo — the user controls repo targeting via
+// search qualifiers.
+//
+// When Search is empty, the legacy "gh issue list --repo" path is used
+// with the individual filter fields, scoped to the issue source repo.
 func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
+	if repo.Filters.Search != "" {
+		return c.searchIssues(repo.Filters.Search)
+	}
+	return c.listRepoIssues(repo)
+}
+
+// searchIssues uses "gh search issues" for cross-repo search.
+// Automatically adds "is:issue" if the query doesn't already contain
+// an issue/PR type qualifier.
+func (c *Client) searchIssues(query string) ([]Issue, error) {
+	if !hasTypeQualifier(query) {
+		query = "is:issue " + query
+	}
+	args := []string{"search", "issues",
+		query,
+		"--json", "number,title,state,url,labels,assignees,body,author,repository",
+		"--limit", "50",
+	}
+
+	out, err := runGH(args...)
+	if err != nil {
+		return nil, fmt.Errorf("search issues: %w", err)
+	}
+
+	var issues []Issue
+	if err := json.Unmarshal(out, &issues); err != nil {
+		return nil, fmt.Errorf("parse search results: %w", err)
+	}
+	return issues, nil
+}
+
+// listRepoIssues uses "gh issue list --repo" for single-repo listing.
+func (c *Client) listRepoIssues(repo *config.RepoConfig) ([]Issue, error) {
 	issueRepo := repo.IssueRepoFullName()
 	args := []string{"issue", "list",
 		"--repo", issueRepo,
@@ -77,22 +118,14 @@ func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 		"--limit", "50",
 	}
 
-	if repo.Filters.Search != "" {
-		// Raw search query mode: pass the query directly.
-		// Don't add --state; the user controls it via search syntax
-		// (e.g. "is:open"). Adding --state could conflict with or
-		// override the search query depending on the gh version.
-		args = append(args, "--search", repo.Filters.Search)
-	} else {
-		if repo.Filters.Assignee != "" {
-			args = append(args, "--assignee", repo.Filters.Assignee)
-		}
-		if repo.Filters.State != "" {
-			args = append(args, "--state", repo.Filters.State)
-		}
-		for _, label := range repo.Filters.Labels {
-			args = append(args, "--label", label)
-		}
+	if repo.Filters.Assignee != "" {
+		args = append(args, "--assignee", repo.Filters.Assignee)
+	}
+	if repo.Filters.State != "" {
+		args = append(args, "--state", repo.Filters.State)
+	}
+	for _, label := range repo.Filters.Labels {
+		args = append(args, "--label", label)
 	}
 
 	out, err := runGH(args...)
@@ -105,6 +138,18 @@ func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 		return nil, fmt.Errorf("parse issues: %w", err)
 	}
 	return issues, nil
+}
+
+// hasTypeQualifier returns true if the query already contains a qualifier
+// that distinguishes issues from PRs (e.g. "is:issue", "is:pr", "type:issue").
+func hasTypeQualifier(query string) bool {
+	lower := strings.ToLower(query)
+	for _, q := range []string{"is:issue", "is:pr", "type:issue", "type:pr"} {
+		if strings.Contains(lower, q) {
+			return true
+		}
+	}
+	return false
 }
 
 // FindPRForBranch looks for a PR with the given head branch.
