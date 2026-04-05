@@ -104,7 +104,7 @@ func run() error {
 
 	ghClient := github.NewClient()
 
-	sessMgr, err := claude.NewManager(&cfg)
+	sessMgr, err := claude.NewManager(&cfg, ghClient)
 	if err != nil {
 		return fmt.Errorf("init session manager: %w", err)
 	}

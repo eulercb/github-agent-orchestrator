@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
@@ -169,65 +171,91 @@ func TestParseWorktreeList(t *testing.T) {
 	}
 }
 
-func TestIssueInfoFromBranch(t *testing.T) {
-	tests := []struct {
-		branch       string
-		expectRepoID string
-		expectNum    int
-	}{
-		{"claude/issue-42", "", 42},
-		{"claude/issue-1", "", 1},
-		{"issue-7", "", 7},
-		{"prefix/issue-10", "", 10},
-		// Cross-repo: issue-<owner-repo>-<number>
-		{"claude/issue-owner-repo-42", "owner-repo", 42},
-		{"claude/issue-my-org-my-repo-99", "my-org-my-repo", 99},
-		// Non-matching
-		{"main", "", 0},
-		{"feature/something", "", 0},
-		{"claude/issue-", "", 0},
-		{"claude/issue-abc", "", 0},
-	}
+func TestWorktreeMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
 
-	for _, tt := range tests {
-		t.Run(tt.branch, func(t *testing.T) {
-			repoID, num := issueInfoFromBranch(tt.branch)
-			assert.Equal(t, tt.expectNum, num, "issue number")
-			assert.Equal(t, tt.expectRepoID, repoID, "repo ID")
-		})
-	}
+	t.Run("write and read", func(t *testing.T) {
+		meta := &worktreeMetadata{IssueNumber: 42, IssueRepo: "acme/app"}
+		require.NoError(t, writeWorktreeMetadata(tmpDir, meta))
+
+		got, err := readWorktreeMetadata(tmpDir)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, 42, got.IssueNumber)
+		assert.Equal(t, "acme/app", got.IssueRepo)
+	})
+
+	t.Run("read missing file", func(t *testing.T) {
+		got, err := readWorktreeMetadata(filepath.Join(tmpDir, "nonexistent"))
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("write creates .claude directory", func(t *testing.T) {
+		newDir := filepath.Join(tmpDir, "fresh-worktree")
+		require.NoError(t, os.MkdirAll(newDir, 0o750))
+		require.NoError(t, writeWorktreeMetadata(newDir, &worktreeMetadata{IssueNumber: 7}))
+
+		info, err := os.Stat(filepath.Join(newDir, ".claude"))
+		require.NoError(t, err)
+		assert.True(t, info.IsDir())
+	})
+
+	t.Run("omitempty issue_repo", func(t *testing.T) {
+		dir := filepath.Join(tmpDir, "no-repo")
+		require.NoError(t, os.MkdirAll(dir, 0o750))
+		require.NoError(t, writeWorktreeMetadata(dir, &worktreeMetadata{IssueNumber: 5}))
+
+		got, err := readWorktreeMetadata(dir)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, 5, got.IssueNumber)
+		assert.Empty(t, got.IssueRepo)
+	})
 }
 
 func TestImportWorktree(t *testing.T) {
-	// Create a temporary state file for the manager.
-	tmpDir := t.TempDir()
+	stateDir := t.TempDir()
 
 	cfg := &config.Config{
 		Repos: []config.RepoConfig{
 			{Owner: "acme", Name: "app"},
 		},
-		SessionDir: tmpDir,
+		SessionDir: stateDir,
 	}
 
-	mgr, err := NewManager(cfg)
+	mgr, err := NewManager(cfg, nil)
 	require.NoError(t, err)
 
 	repo := &cfg.Repos[0]
 
-	t.Run("standard branch", func(t *testing.T) {
-		wt := &Worktree{Path: "/tmp/app/.worktrees/claude/issue-42", Branch: "claude/issue-42"}
+	t.Run("reads metadata file", func(t *testing.T) {
+		wtDir := filepath.Join(t.TempDir(), "wt-42")
+		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
+			IssueNumber: 42,
+			IssueRepo:   "acme/app",
+		}))
+
+		wt := &Worktree{Path: wtDir, Branch: "claude/issue-42"}
 		sess, err := mgr.ImportWorktree(repo, wt)
 		require.NoError(t, err)
 		assert.Equal(t, "gao-acme-app-42", sess.ID)
 		assert.Equal(t, 42, sess.IssueNumber)
-		assert.Equal(t, "acme/app", sess.Repo)
-		assert.Empty(t, sess.IssueRepo)
+		assert.Equal(t, "acme/app", sess.IssueRepo)
 		assert.Equal(t, StatusStopped, sess.Status)
 		assert.Equal(t, 0, sess.PID)
 	})
 
-	t.Run("cross-repo branch", func(t *testing.T) {
-		wt := &Worktree{Path: "/tmp/app/.worktrees/claude/issue-other-repo-7", Branch: "claude/issue-other-repo-7"}
+	t.Run("cross-repo metadata", func(t *testing.T) {
+		wtDir := filepath.Join(t.TempDir(), "wt-cross")
+		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
+			IssueNumber: 7,
+			IssueRepo:   "other/repo",
+		}))
+
+		wt := &Worktree{Path: wtDir, Branch: "claude/issue-other-repo-7"}
 		sess, err := mgr.ImportWorktree(repo, wt)
 		require.NoError(t, err)
 		assert.Equal(t, "gao-acme-app-other-repo-7", sess.ID)
@@ -235,8 +263,23 @@ func TestImportWorktree(t *testing.T) {
 		assert.Equal(t, "other/repo", sess.IssueRepo)
 	})
 
+	t.Run("no metadata falls back to unassociated", func(t *testing.T) {
+		wtDir := filepath.Join(t.TempDir(), "wt-bare")
+		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+
+		wt := &Worktree{Path: wtDir, Branch: "feature/something"}
+		sess, err := mgr.ImportWorktree(repo, wt)
+		require.NoError(t, err)
+		assert.Equal(t, "gao-acme-app-feature-something", sess.ID)
+		assert.Equal(t, 0, sess.IssueNumber)
+		assert.Empty(t, sess.IssueRepo)
+	})
+
 	t.Run("detached worktree", func(t *testing.T) {
-		wt := &Worktree{Path: "/tmp/app/.worktrees/detached-abc", Branch: ""}
+		wtDir := filepath.Join(t.TempDir(), "detached-abc")
+		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+
+		wt := &Worktree{Path: wtDir, Branch: ""}
 		sess, err := mgr.ImportWorktree(repo, wt)
 		require.NoError(t, err)
 		assert.Equal(t, "gao-acme-app-detached-abc", sess.ID)
@@ -244,7 +287,16 @@ func TestImportWorktree(t *testing.T) {
 	})
 
 	t.Run("collision detection", func(t *testing.T) {
-		wt := &Worktree{Path: "/tmp/app/.worktrees/claude/issue-42", Branch: "claude/issue-42"}
+		// Re-use the same worktree dir from "reads metadata file" test.
+		// Create a new worktree dir with the same issue to trigger collision.
+		wtDir := filepath.Join(t.TempDir(), "wt-42-dup")
+		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
+			IssueNumber: 42,
+			IssueRepo:   "acme/app",
+		}))
+
+		wt := &Worktree{Path: wtDir, Branch: "claude/issue-42"}
 		_, err := mgr.ImportWorktree(repo, wt)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "already exists")

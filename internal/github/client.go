@@ -232,6 +232,79 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 	}
 }
 
+// LinkedIssue represents a GitHub issue linked to a pull request via
+// closing references (e.g. "Closes #42" in the PR body).
+type LinkedIssue struct {
+	Number     int    `json:"number"`
+	Repository string `json:"repository"` // "owner/name"
+}
+
+// FindLinkedIssue looks up the first issue linked to the PR on a given branch
+// using the GitHub GraphQL API. Returns nil when no PR or linked issue is found.
+func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, error) {
+	parts := strings.SplitN(repoFullName, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid repo name %q", repoFullName)
+	}
+	owner, name := parts[0], parts[1]
+
+	query := fmt.Sprintf(`{
+  repository(owner: %q, name: %q) {
+    pullRequests(headRefName: %q, first: 1, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        closingIssuesReferences(first: 1) {
+          nodes {
+            number
+            repository { nameWithOwner }
+          }
+        }
+      }
+    }
+  }
+}`, owner, name, branch)
+
+	out, err := runGH("api", "graphql", "-f", "query="+query)
+	if err != nil {
+		return nil, fmt.Errorf("graphql linked issues: %w", err)
+	}
+
+	var result struct {
+		Data struct {
+			Repository struct {
+				PullRequests struct {
+					Nodes []struct {
+						ClosingIssuesReferences struct {
+							Nodes []struct {
+								Number     int `json:"number"`
+								Repository struct {
+									NameWithOwner string `json:"nameWithOwner"`
+								} `json:"repository"`
+							} `json:"nodes"`
+						} `json:"closingIssuesReferences"`
+					} `json:"nodes"`
+				} `json:"pullRequests"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, fmt.Errorf("parse graphql response: %w", err)
+	}
+
+	prs := result.Data.Repository.PullRequests.Nodes
+	if len(prs) == 0 {
+		return nil, nil
+	}
+	issues := prs[0].ClosingIssuesReferences.Nodes
+	if len(issues) == 0 {
+		return nil, nil
+	}
+
+	return &LinkedIssue{
+		Number:     issues[0].Number,
+		Repository: issues[0].Repository.NameWithOwner,
+	}, nil
+}
+
 // OpenInBrowser opens an issue or PR in the default browser using gh browse.
 func (c *Client) OpenInBrowser(repo string, number int) error {
 	_, err := runGH("browse", strconv.Itoa(number), "--repo", repo)
