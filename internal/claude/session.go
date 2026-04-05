@@ -301,21 +301,35 @@ func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, e
 
 	worktrees := parseWorktreeList(out)
 
-	// Filter to only worktrees under .worktrees/ and not already tracked
-	worktreeBase := filepath.Join(repoDir, ".worktrees") + string(filepath.Separator)
+	// Normalize worktreeBase so path comparisons are reliable even when
+	// spawn.repo_dir is relative or contains symlinks.
+	worktreeBase, err := filepath.Abs(filepath.Join(repoDir, ".worktrees"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve worktree base: %w", err)
+	}
+	worktreeBase += string(filepath.Separator)
+
 	m.mu.RLock()
 	tracked := make(map[string]bool, len(m.sessions))
 	for i := range m.sessions {
-		tracked[m.sessions[i].WorktreePath] = true
+		p := m.sessions[i].WorktreePath
+		if abs, absErr := filepath.Abs(p); absErr == nil {
+			p = abs
+		}
+		tracked[p] = true
 	}
 	m.mu.RUnlock()
 
 	var untracked []Worktree
 	for _, wt := range worktrees {
-		if !strings.HasPrefix(wt.Path, worktreeBase) {
+		absPath := wt.Path
+		if abs, absErr := filepath.Abs(wt.Path); absErr == nil {
+			absPath = abs
+		}
+		if !strings.HasPrefix(absPath, worktreeBase) {
 			continue
 		}
-		if tracked[wt.Path] {
+		if tracked[absPath] {
 			continue
 		}
 		untracked = append(untracked, wt)
@@ -351,34 +365,60 @@ func parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
-// issueNumberFromBranch extracts the issue number from a branch whose last
-// path component matches "issue-N" (e.g. "claude/issue-42", "issue-7").
-// Returns 0 if no match is found.
-func issueNumberFromBranch(branch string) int {
+// issueInfoFromBranch extracts issue metadata from a branch whose last path
+// component matches either "issue-N" (e.g. "claude/issue-42", "issue-7") or
+// "issue-<issueRepoID>-N" (e.g. "claude/issue-owner-repo-42").
+// Returns an empty repo ID and 0 if no match is found.
+func issueInfoFromBranch(branch string) (repoID string, issueNum int) {
 	// Use the last path component so the prefix (e.g. "claude/") doesn't matter.
 	base := branch
 	if idx := strings.LastIndex(branch, "/"); idx >= 0 {
 		base = branch[idx+1:]
 	}
+
+	if !strings.HasPrefix(base, "issue-") {
+		return "", 0
+	}
+
+	// Try simple "issue-N" first.
 	var num int
-	if _, err := fmt.Sscanf(base, "issue-%d", &num); err != nil {
-		return 0
+	if _, err := fmt.Sscanf(base, "issue-%d", &num); err == nil && fmt.Sprintf("issue-%d", num) == base {
+		return "", num
 	}
-	if fmt.Sprintf("issue-%d", num) != base {
-		return 0
+
+	// Try "issue-<repoID>-N" where repoID may contain dashes.
+	rest := strings.TrimPrefix(base, "issue-")
+	lastDash := strings.LastIndex(rest, "-")
+	if lastDash <= 0 || lastDash == len(rest)-1 {
+		return "", 0
 	}
-	return num
+
+	issueRepoID := rest[:lastDash]
+	if _, err := fmt.Sscanf(rest[lastDash+1:], "%d", &num); err != nil {
+		return "", 0
+	}
+	if fmt.Sprintf("%d", num) != rest[lastDash+1:] {
+		return "", 0
+	}
+
+	return issueRepoID, num
 }
 
 // ImportWorktree registers an existing worktree as a tracked session without
 // starting a process. The session appears as stopped so the user can attach
 // to it interactively via the existing attach flow.
 func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Session, error) {
-	issueNumber := issueNumberFromBranch(wt.Branch)
-	sessionName := fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
-	if issueNumber == 0 {
-		// Use a sanitized branch name for non-standard branches.
-		// For detached worktrees (empty branch), derive a suffix from the path.
+	issueRepoID, issueNumber := issueInfoFromBranch(wt.Branch)
+
+	var sessionName string
+	switch {
+	case issueNumber > 0 && issueRepoID != "":
+		// Cross-repo issue: matches SpawnSession's naming for IssueSource branches.
+		sessionName = fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, issueRepoID, issueNumber)
+	case issueNumber > 0:
+		sessionName = fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
+	default:
+		// Non-standard branch: sanitize for use as session suffix.
 		safe := strings.NewReplacer("/", "-", ".", "-").Replace(wt.Branch)
 		if safe == "" {
 			safe = filepath.Base(wt.Path)
@@ -396,10 +436,17 @@ func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Sessio
 	}
 	m.mu.RUnlock()
 
+	// Populate IssueRepo when the branch encodes a cross-repo issue source.
+	issueRepo := ""
+	if issueRepoID != "" {
+		issueRepo = strings.Replace(issueRepoID, "-", "/", 1)
+	}
+
 	sess := Session{
 		ID:           sessionName,
 		IssueNumber:  issueNumber,
 		Repo:         repo.FullName(),
+		IssueRepo:    issueRepo,
 		Branch:       wt.Branch,
 		WorktreePath: wt.Path,
 		CreatedAt:    time.Now(),

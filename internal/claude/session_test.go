@@ -3,7 +3,9 @@ package claude
 import (
 	"testing"
 
+	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractLastActivity(t *testing.T) {
@@ -167,28 +169,84 @@ func TestParseWorktreeList(t *testing.T) {
 	}
 }
 
-func TestIssueNumberFromBranch(t *testing.T) {
+func TestIssueInfoFromBranch(t *testing.T) {
 	tests := []struct {
-		branch string
-		expect int
+		branch       string
+		expectRepoID string
+		expectNum    int
 	}{
-		{"claude/issue-42", 42},
-		{"claude/issue-1", 1},
-		{"claude/issue-999", 999},
-		{"issue-7", 7},
-		{"prefix/issue-10", 10},
-		{"claude/issue-42-extra", 0},
-		{"claude/issue-42-suffix", 0},
-		{"main", 0},
-		{"feature/something", 0},
-		{"claude/issue-", 0},
-		{"claude/issue-abc", 0},
+		{"claude/issue-42", "", 42},
+		{"claude/issue-1", "", 1},
+		{"issue-7", "", 7},
+		{"prefix/issue-10", "", 10},
+		// Cross-repo: issue-<owner-repo>-<number>
+		{"claude/issue-owner-repo-42", "owner-repo", 42},
+		{"claude/issue-my-org-my-repo-99", "my-org-my-repo", 99},
+		// Non-matching
+		{"main", "", 0},
+		{"feature/something", "", 0},
+		{"claude/issue-", "", 0},
+		{"claude/issue-abc", "", 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.branch, func(t *testing.T) {
-			got := issueNumberFromBranch(tt.branch)
-			assert.Equal(t, tt.expect, got)
+			repoID, num := issueInfoFromBranch(tt.branch)
+			assert.Equal(t, tt.expectNum, num, "issue number")
+			assert.Equal(t, tt.expectRepoID, repoID, "repo ID")
 		})
 	}
+}
+
+func TestImportWorktree(t *testing.T) {
+	// Create a temporary state file for the manager.
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Repos: []config.RepoConfig{
+			{Owner: "acme", Name: "app"},
+		},
+		SessionDir: tmpDir,
+	}
+
+	mgr, err := NewManager(cfg)
+	require.NoError(t, err)
+
+	repo := &cfg.Repos[0]
+
+	t.Run("standard branch", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/app/.worktrees/claude/issue-42", Branch: "claude/issue-42"}
+		sess, err := mgr.ImportWorktree(repo, wt)
+		require.NoError(t, err)
+		assert.Equal(t, "gao-acme-app-42", sess.ID)
+		assert.Equal(t, 42, sess.IssueNumber)
+		assert.Equal(t, "acme/app", sess.Repo)
+		assert.Empty(t, sess.IssueRepo)
+		assert.Equal(t, StatusStopped, sess.Status)
+		assert.Equal(t, 0, sess.PID)
+	})
+
+	t.Run("cross-repo branch", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/app/.worktrees/claude/issue-other-repo-7", Branch: "claude/issue-other-repo-7"}
+		sess, err := mgr.ImportWorktree(repo, wt)
+		require.NoError(t, err)
+		assert.Equal(t, "gao-acme-app-other-repo-7", sess.ID)
+		assert.Equal(t, 7, sess.IssueNumber)
+		assert.Equal(t, "other/repo", sess.IssueRepo)
+	})
+
+	t.Run("detached worktree", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/app/.worktrees/detached-abc", Branch: ""}
+		sess, err := mgr.ImportWorktree(repo, wt)
+		require.NoError(t, err)
+		assert.Equal(t, "gao-acme-app-detached-abc", sess.ID)
+		assert.Equal(t, 0, sess.IssueNumber)
+	})
+
+	t.Run("collision detection", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/app/.worktrees/claude/issue-42", Branch: "claude/issue-42"}
+		_, err := mgr.ImportWorktree(repo, wt)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already exists")
+	})
 }

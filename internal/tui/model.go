@@ -266,6 +266,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		return m, filterCmd
 	case worktreesImportedMsg:
 		switch {
+		case msg.err != nil && msg.count > 0:
+			m.errorMsg = fmt.Sprintf("Imported %d worktree(s), then: %v", msg.count, msg.err)
+			m.activePanel = PanelSessions
+			return m, tea.Batch(filterCmd, m.fetchPRs())
 		case msg.err != nil:
 			m.errorMsg = fmt.Sprintf("Import worktrees failed: %v", msg.err)
 		case msg.count == 0:
@@ -273,7 +277,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		default:
 			m.errorMsg = ""
 			m.activePanel = PanelSessions
-			// Fetch PRs for newly imported sessions so branch→PR association shows up.
 			return m, tea.Batch(filterCmd, m.fetchPRs())
 		}
 		return m, filterCmd
