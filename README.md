@@ -27,9 +27,9 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 ## The workflow
 
 1. **See your issues** — gao fetches open issues from the first configured repo (filtered by assignee, labels, etc.)
-2. **Spawn an agent** — Press `s` on an issue to create a Claude Code session in a tmux + git worktree
+2. **Spawn an agent** — Press `s` on an issue to create a Claude Code session in a git worktree
 3. **Monitor progress** — The dashboard auto-refreshes session statuses (working / waiting / done) and tracks PRs by branch
-4. **Jump into a session** — Press `a` to attach (opens a Warp tab if available, or suspends the TUI and runs `tmux attach`)
+4. **Jump into a session** — Press `a` to attach (opens a Warp tab if available, or suspends the TUI and launches an interactive Claude session)
 5. **Review the result** — Press `o` to open the linked PR in your browser
 
 ## Requirements
@@ -38,7 +38,6 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 |------|----------|---------|
 | [Go](https://go.dev/) 1.24+ | Build only | Compiling gao |
 | [gh](https://cli.github.com/) | Yes | GitHub API (issues, PRs) |
-| [tmux](https://github.com/tmux/tmux) | Yes | Background sessions |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Yes | The AI agent |
 | [Warp](https://www.warp.dev/) | No | Optional: opens sessions in new Warp tabs |
 | [ccusage](https://github.com/ryoppippi/ccusage) | No | Optional: token usage tracking in the status bar |
@@ -105,7 +104,7 @@ gao
 | `?` | Toggle help |
 | `q` | Quit |
 
-Shortcuts were kept minimal to avoid conflicts with tmux key bindings.
+Shortcuts were kept minimal for a clean single-layer keymap.
 
 ## Documentation
 

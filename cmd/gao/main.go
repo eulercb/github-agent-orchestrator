@@ -15,7 +15,6 @@ import (
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
-	"github.com/eulercb/github-agent-orchestrator/internal/tmux"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui"
 )
 
@@ -102,9 +101,8 @@ func run() error {
 	}
 
 	ghClient := github.NewClient()
-	tmuxClient := tmux.NewClient()
 
-	sessMgr, err := claude.NewManager(&cfg, tmuxClient)
+	sessMgr, err := claude.NewManager(&cfg)
 	if err != nil {
 		return fmt.Errorf("init session manager: %w", err)
 	}

@@ -27,7 +27,7 @@ repos:
 
 # How Claude Code sessions are spawned.
 spawn:
-  # Shell command to run inside the tmux session after cd-ing into the worktree.
+  # Shell command to run in the worktree directory.
   # This is where you control Claude Code's permission mode.
   # Default: "claude --dangerously-skip-permissions"
   command: "claude --dangerously-skip-permissions"
@@ -49,14 +49,6 @@ spawn:
 
 # How to attach to a running session.
 attach:
-  # Shell command template for attaching. Available template variables:
-  #   {{.Session}}       - raw tmux session name
-  #   {{.SessionQuoted}} - shell-quoted session name (safe for sh -c)
-  # The command is executed via sh -c.
-  # Used when Warp is not available.
-  # Default: "tmux attach-session -t {{.SessionQuoted}}"
-  command: "tmux attach-session -t {{.SessionQuoted}}"
-
   # Force Warp tab behavior on/off. When unset (null), gao auto-detects
   # Warp by checking if warp-cli is on PATH.
   # Default: null (auto-detect)
@@ -106,6 +98,7 @@ Everything else uses sensible defaults.
 |------|---------|
 | `~/.config/gao/config.yaml` | User configuration |
 | `~/.config/gao/sessions.yaml` | Persisted session state (managed by gao, not hand-edited) |
+| `~/.config/gao/logs/*.log` | Session output logs (stdout/stderr from Claude processes) |
 
 ## Custom spawn scripts
 

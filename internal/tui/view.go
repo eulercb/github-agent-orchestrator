@@ -333,7 +333,7 @@ func (m *Model) viewHelp() string {
 
   Actions:
     s            Spawn a new Claude Code session for selected issue
-    a            Attach to selected session (opens in tmux)
+    a            Attach to selected session (opens interactive Claude)
     o            Open issue/PR in browser
     x            Kill selected session
     r            Refresh issues and session statuses

@@ -18,7 +18,7 @@ type KeyMap struct {
 }
 
 // DefaultKeyMap returns the default key bindings.
-// Kept minimal to avoid conflicts with tmux.
+// Kept minimal and single-layer to avoid conflicts with terminal shortcuts.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Up: key.NewBinding(

@@ -69,10 +69,9 @@ When a review comment is valid but too large for the current PR:
 
 ### Shell command safety
 
-When building shell commands for tmux `send-keys`:
-- Use `shellQuote()` for all user-controlled or config-controlled values
-- For values that need shell expansion (like `$(...)` subshells), leave them unquoted
-- The `base_branch` handling in `session.go` demonstrates both patterns
+When building shell commands:
+- Use `shellQuoteSession()` (in `internal/tui/model.go`) for all user-controlled or config-controlled values interpolated into `sh -c` strings
+- The `resolveAttachCommand()` in `model.go` demonstrates this pattern
 
 ## Session management tips
 
