@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -69,6 +70,26 @@ type IssueFilters struct {
 	Labels   []string `yaml:"labels"`
 	State    string   `yaml:"state"`
 	Search   string   `yaml:"search,omitempty"`
+}
+
+// BuildSearch synthesizes a GitHub search query from the individual filter
+// fields. Returns the existing Search value if already set, or an empty
+// string if no filters are configured.
+func (f *IssueFilters) BuildSearch() string {
+	if f.Search != "" {
+		return f.Search
+	}
+	var parts []string
+	if f.State != "" && f.State != "all" {
+		parts = append(parts, "is:"+f.State)
+	}
+	if f.Assignee != "" {
+		parts = append(parts, "assignee:"+f.Assignee)
+	}
+	for _, label := range f.Labels {
+		parts = append(parts, "label:"+label)
+	}
+	return strings.Join(parts, " ")
 }
 
 // SpawnConfig controls how Claude Code sessions are created.

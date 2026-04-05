@@ -119,6 +119,33 @@ func TestSaveAndLoadWithSearch(t *testing.T) {
 	}
 }
 
+func TestBuildSearch(t *testing.T) {
+	// Returns existing Search as-is.
+	f := IssueFilters{Search: "custom query"}
+	if got := f.BuildSearch(); got != "custom query" {
+		t.Errorf("expected existing search, got %q", got)
+	}
+
+	// Synthesizes from individual filters.
+	f = IssueFilters{State: "open", Assignee: "@me", Labels: []string{"bug", "p1"}}
+	want := "is:open assignee:@me label:bug label:p1"
+	if got := f.BuildSearch(); got != want {
+		t.Errorf("BuildSearch() = %q, want %q", got, want)
+	}
+
+	// State "all" is omitted.
+	f = IssueFilters{State: "all", Assignee: "@me"}
+	if got := f.BuildSearch(); got != "assignee:@me" {
+		t.Errorf("BuildSearch() with state=all = %q, want %q", got, "assignee:@me")
+	}
+
+	// Empty filters returns empty string.
+	f = IssueFilters{}
+	if got := f.BuildSearch(); got != "" {
+		t.Errorf("BuildSearch() empty = %q, want empty", got)
+	}
+}
+
 func TestRepoFullName(t *testing.T) {
 	r := RepoConfig{Owner: "foo", Name: "bar"}
 	if r.FullName() != "foo/bar" {

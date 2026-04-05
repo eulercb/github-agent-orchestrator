@@ -102,17 +102,24 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	if m.loading {
 		header += styles.MutedText.Render(" (loading...)")
 	}
-	if repo := m.currentRepo(); repo != nil && repo.Filters.Search != "" {
-		filterText := repo.Filters.Search
-		maxFilterLen := m.width - lipgloss.Width(header) - 6 // "  / " prefix + margin
+	if repo := m.currentRepo(); repo != nil {
+		filterText := repo.Filters.BuildSearch()
+		// Reserve space for "  / " prefix (4) + "..." suffix (3) + margin (1).
+		maxFilterLen := m.width - lipgloss.Width(header) - 8
 		if maxFilterLen < 0 {
 			maxFilterLen = 0
 		}
 		filterRunes := []rune(filterText)
 		if len(filterRunes) > maxFilterLen {
-			filterText = string(filterRunes[:maxFilterLen]) + "..."
+			if maxFilterLen > 0 {
+				filterText = string(filterRunes[:maxFilterLen]) + "..."
+			} else {
+				filterText = ""
+			}
 		}
-		header += styles.MutedText.Render("  / " + filterText)
+		if filterText != "" {
+			header += styles.MutedText.Render("  / " + filterText)
+		}
 	}
 
 	var lines []string

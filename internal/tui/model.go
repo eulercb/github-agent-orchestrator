@@ -146,9 +146,13 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
-	// When the filter input is active, forward all messages to it first.
+	// When the filter input is active, only intercept key messages so
+	// background refreshes, async loads, and window resizes still flow
+	// through the normal update path.
 	if m.currentView == ViewFilter {
-		return m.updateFilter(msg)
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			return m.updateFilter(keyMsg)
+		}
 	}
 
 	switch msg := msg.(type) {
@@ -304,38 +308,46 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			inputWidth = 20
 		}
 		m.filterInput.Width = inputWidth
+		// If no search query is set but individual config filters exist,
+		// synthesize a query so the user can see (and edit) what's active.
+		if repo := m.currentRepo(); repo != nil && m.filterInput.Value() == "" {
+			m.filterInput.SetValue(repo.Filters.BuildSearch())
+		}
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()
 	}
 	return m, nil
 }
 
-// updateFilter handles input while the filter editor is active.
-func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		switch keyMsg.Type {
-		case tea.KeyEnter:
-			// Apply the filter and refresh issues.
-			m.currentView = ViewDashboard
-			m.filterInput.Blur()
-			query := strings.TrimSpace(m.filterInput.Value())
-			repo := m.currentRepo()
-			if repo != nil {
-				repo.Filters.Search = query
-			}
-			m.loading = true
-			m.issuesCursor = 0
-			cmd := m.fetchIssues()
-			return m, cmd
-		case tea.KeyEsc:
-			// Cancel: restore the previous value.
-			m.currentView = ViewDashboard
-			m.filterInput.Blur()
-			if repo := m.currentRepo(); repo != nil {
-				m.filterInput.SetValue(repo.Filters.Search)
-			}
-			return m, nil
+// updateFilter handles key input while the filter editor is active.
+func (m *Model) updateFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		// Apply the filter and refresh issues.
+		m.currentView = ViewDashboard
+		m.filterInput.Blur()
+		query := strings.TrimSpace(m.filterInput.Value())
+		repo := m.currentRepo()
+		if repo != nil {
+			repo.Filters.Search = query
+			// Clear individual filters so they don't silently re-apply
+			// if the user later clears the search query.
+			repo.Filters.Assignee = ""
+			repo.Filters.State = ""
+			repo.Filters.Labels = nil
 		}
+		m.loading = true
+		m.issuesCursor = 0
+		cmd := m.fetchIssues()
+		return m, cmd
+	case tea.KeyEsc:
+		// Cancel: restore the previous value.
+		m.currentView = ViewDashboard
+		m.filterInput.Blur()
+		if repo := m.currentRepo(); repo != nil {
+			m.filterInput.SetValue(repo.Filters.Search)
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
