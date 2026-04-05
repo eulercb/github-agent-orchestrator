@@ -61,7 +61,7 @@ func (r *RepoConfig) IssueRepoFullName() string {
 }
 
 // IssueFilters controls which issues are shown.
-// When Search is set, it is passed to "gh issue list -S" and the individual
+// When Search is set, it is passed to "gh issue list --search" and the individual
 // filter fields (Assignee, Labels, State) are ignored because GitHub's search
 // syntax subsumes them (e.g. "is:open assignee:eulercb label:bug").
 type IssueFilters struct {

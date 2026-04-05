@@ -15,6 +15,7 @@ type KeyMap struct {
 	Delete  key.Binding
 	Refresh key.Binding
 	Help    key.Binding
+	Filter  key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -64,6 +65,10 @@ func DefaultKeyMap() KeyMap {
 		Help: key.NewBinding(
 			key.WithKeys("?"),
 			key.WithHelp("?", "help"),
+		),
+		Filter: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "filter"),
 		),
 	}
 }

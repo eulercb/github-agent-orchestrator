@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
@@ -34,6 +35,7 @@ const (
 	ViewDashboard View = iota
 	ViewHelp
 	ViewConfirm
+	ViewFilter
 )
 
 // prCacheKey builds a unique key for the PR cache from repo and branch.
@@ -63,6 +65,7 @@ type Model struct {
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
+	filterInput   textinput.Model
 }
 
 // NewModel creates the initial TUI model.
@@ -74,13 +77,24 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		sbCmd = cfg.CCUsage.Command
 	}
 
+	ti := textinput.New()
+	ti.Placeholder = "is:open assignee:eulercb archived:false"
+	ti.CharLimit = 256
+	ti.Width = 60
+
+	// Pre-populate with the current search filter from config.
+	if len(cfg.Repos) > 0 {
+		ti.SetValue(cfg.Repos[0].Filters.Search)
+	}
+
 	return Model{
-		cfg:        cfg,
-		gh:         ghClient,
-		sessions:   sessMgr,
-		statusProv: statusbar.NewProvider(sbCmd, nil),
-		keys:       DefaultKeyMap(),
-		prCache:    make(map[string]*github.PullRequest),
+		cfg:         cfg,
+		gh:          ghClient,
+		sessions:    sessMgr,
+		statusProv:  statusbar.NewProvider(sbCmd, nil),
+		keys:        DefaultKeyMap(),
+		prCache:     make(map[string]*github.PullRequest),
+		filterInput: ti,
 	}
 }
 
@@ -133,6 +147,11 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
+	// When the filter input is active, forward all messages to it first.
+	if m.currentView == ViewFilter {
+		return m.updateFilter(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -278,8 +297,45 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
 		return m, tea.Batch(m.fetchIssues(), m.refreshStatuses())
+	case key.Matches(msg, m.keys.Filter):
+		m.currentView = ViewFilter
+		m.filterInput.Focus()
+		return m, m.filterInput.Cursor.BlinkCmd()
 	}
 	return m, nil
+}
+
+// updateFilter handles input while the filter editor is active.
+func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.Type {
+		case tea.KeyEnter:
+			// Apply the filter and refresh issues.
+			m.currentView = ViewDashboard
+			m.filterInput.Blur()
+			query := strings.TrimSpace(m.filterInput.Value())
+			repo := m.currentRepo()
+			if repo != nil {
+				repo.Filters.Search = query
+			}
+			m.loading = true
+			m.issuesCursor = 0
+			cmd := m.fetchIssues()
+			return m, cmd
+		case tea.KeyEsc:
+			// Cancel: restore the previous value.
+			m.currentView = ViewDashboard
+			m.filterInput.Blur()
+			if repo := m.currentRepo(); repo != nil {
+				m.filterInput.SetValue(repo.Filters.Search)
+			}
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.filterInput, cmd = m.filterInput.Update(msg)
+	return m, cmd
 }
 
 func (m *Model) moveCursor(delta int) {

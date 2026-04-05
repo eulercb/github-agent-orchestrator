@@ -22,6 +22,8 @@ func (m Model) View() string { //nolint:gocritic // tea.Model interface requires
 		return m.viewHelp()
 	case ViewConfirm:
 		return m.viewConfirm()
+	case ViewFilter:
+		return m.viewFilter()
 	default:
 		return m.viewDashboard()
 	}
@@ -99,6 +101,9 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	header := titleStyle.Render("Issues")
 	if m.loading {
 		header += styles.MutedText.Render(" (loading...)")
+	}
+	if repo := m.currentRepo(); repo != nil && repo.Filters.Search != "" {
+		header += styles.MutedText.Render("  / " + repo.Filters.Search)
 	}
 
 	var lines []string
@@ -315,9 +320,9 @@ func (m *Model) renderStatusBar() string {
 func (m *Model) renderHelpBar() string {
 	var items []string
 	if m.activePanel == PanelIssues {
-		items = []string{"↑↓ navigate", "tab switch", "s spawn", "o open", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "o open", "r refresh", "? help", "q quit"}
 	} else {
-		items = []string{"↑↓ navigate", "tab switch", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
@@ -332,6 +337,7 @@ func (m *Model) viewHelp() string {
     Esc          Go back
 
   Actions:
+    /            Edit issue filter (GitHub search syntax)
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
     o            Open issue/PR in browser
@@ -350,6 +356,16 @@ func (m *Model) viewHelp() string {
 		width = 0
 	}
 	return styles.BorderedBox.Width(width).Render(help)
+}
+
+func (m *Model) viewFilter() string {
+	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:eulercb  label:bug  archived:false  user:my-company\n",
+		m.filterInput.View())
+	width := m.width - 4
+	if width < 0 {
+		width = 0
+	}
+	return styles.BorderedBox.Width(width).Render(content)
 }
 
 func (m *Model) viewConfirm() string {
