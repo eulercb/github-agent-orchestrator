@@ -166,10 +166,7 @@ func doInit() error {
 	name := prompt(scanner, "Repository name", detectedName)
 
 	if owner != "" && name != "" {
-		issueOwner := prompt(scanner, "Issue source repo owner (blank to use same repo)", "")
-		issueName := prompt(scanner, "Issue source repo name (blank to use same repo)", "")
-
-		defaultSearch := fmt.Sprintf("is:open repo:%s/%s", owner, name)
+		defaultSearch := fmt.Sprintf("is:open assignee:@me repo:%s/%s", owner, name)
 		search := prompt(scanner, "Issue filter (GitHub search syntax)", defaultSearch)
 
 		repo := config.RepoConfig{
@@ -178,23 +175,6 @@ func doInit() error {
 			Filters: config.IssueFilters{
 				Search: search,
 			},
-		}
-
-		// Default blank issue source fields to the main repo values.
-		resolvedIssueOwner := issueOwner
-		if resolvedIssueOwner == "" {
-			resolvedIssueOwner = owner
-		}
-		resolvedIssueName := issueName
-		if resolvedIssueName == "" {
-			resolvedIssueName = name
-		}
-
-		if resolvedIssueOwner != owner || resolvedIssueName != name {
-			repo.IssueSource = &config.IssueSource{
-				Owner: resolvedIssueOwner,
-				Name:  resolvedIssueName,
-			}
 		}
 
 		cfg.Repos = []config.RepoConfig{repo}
