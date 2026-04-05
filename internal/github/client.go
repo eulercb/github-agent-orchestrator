@@ -83,9 +83,10 @@ func (c *Client) ListIssues(search string) ([]Issue, error) {
 	}
 	// Split the query into individual terms so each qualifier is passed as
 	// a separate positional argument to gh (gh search issues is:open is:issue ...)
-	// rather than a single quoted string.
+	// rather than a single quoted string. Quoted segments like
+	// label:"good first issue" are preserved as a single argument.
 	args := []string{"search", "issues"}
-	args = append(args, strings.Fields(query)...)
+	args = append(args, splitQuery(query)...)
 	args = append(args,
 		"--json", "number,title,state,url,labels,assignees,body,author,repository",
 		"--limit", "50",
@@ -101,6 +102,34 @@ func (c *Client) ListIssues(search string) ([]Issue, error) {
 		return nil, fmt.Errorf("parse search results: %w", err)
 	}
 	return issues, nil
+}
+
+// splitQuery splits a search query into tokens, preserving quoted segments.
+// For example: `is:open label:"good first issue" assignee:@me` becomes
+// ["is:open", `label:"good first issue"`, "assignee:@me"].
+func splitQuery(query string) []string {
+	var tokens []string
+	var current strings.Builder
+	inQuote := false
+
+	for _, r := range query {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+			current.WriteRune(r)
+		case r == ' ' && !inQuote:
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
 }
 
 // hasTypeQualifier returns true if the query already contains a qualifier
