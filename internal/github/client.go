@@ -68,12 +68,13 @@ func NewClient() *Client {
 	return &Client{}
 }
 
-// ListIssues fetches issues using "gh search issues" with the configured
-// search query. The query can span multiple repos via qualifiers like
+// ListIssues fetches issues using "gh search issues" with the given search
+// query. The query can span multiple repos via qualifiers like
 // "repo:org/a repo:org/b is:open". Automatically adds "is:issue" if no
-// type qualifier is present.
-func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
-	query := repo.Filters.Search
+// type qualifier is present. No repo scoping is applied beyond what the
+// query itself contains.
+func (c *Client) ListIssues(search string) ([]Issue, error) {
+	query := search
 	if query == "" {
 		query = config.DefaultSearch
 	}

@@ -166,8 +166,7 @@ func doInit() error {
 	name := prompt(scanner, "Repository name", detectedName)
 
 	if owner != "" && name != "" {
-		defaultSearch := fmt.Sprintf("is:open assignee:@me repo:%s/%s", owner, name)
-		search := prompt(scanner, "Issue filter (GitHub search syntax)", defaultSearch)
+		search := prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultSearch)
 
 		repo := config.RepoConfig{
 			Owner: owner,

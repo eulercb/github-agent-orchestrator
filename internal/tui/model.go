@@ -439,7 +439,7 @@ func (m *Model) fetchIssues() tea.Cmd {
 		if repo == nil {
 			return issuesLoadedMsg{err: fmt.Errorf("no repos configured")}
 		}
-		issues, err := m.gh.ListIssues(repo)
+		issues, err := m.gh.ListIssues(repo.Filters.Search)
 		return issuesLoadedMsg{issues: issues, err: err}
 	}
 }
