@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -185,9 +186,9 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 	}
 }
 
-// OpenInBrowser opens a URL in the default browser using gh browse.
-func (c *Client) OpenInBrowser(url string) error {
-	_, err := runGH("browse", "--url", url)
+// OpenInBrowser opens an issue or PR in the default browser using gh browse.
+func (c *Client) OpenInBrowser(repo string, number int) error {
+	_, err := runGH("browse", strconv.Itoa(number), "--repo", repo)
 	return err
 }
 
