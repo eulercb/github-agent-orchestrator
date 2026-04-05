@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -185,10 +186,25 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 	}
 }
 
-// OpenInBrowser opens a URL in the default browser using gh browse.
+// OpenInBrowser opens a URL in the default browser using the system opener.
 func (c *Client) OpenInBrowser(url string) error {
-	_, err := runGH("browse", "--url", url)
-	return err
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	opener := browserOpener()
+	cmd := exec.CommandContext(ctx, opener, url)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("browser open: %w", err)
+	}
+	// Don't wait for the opener to finish; it may block until the browser closes.
+	return nil
+}
+
+func browserOpener() string {
+	if runtime.GOOS == "darwin" {
+		return "open"
+	}
+	return "xdg-open"
 }
 
 func runGH(args ...string) ([]byte, error) {
