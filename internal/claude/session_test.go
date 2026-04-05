@@ -2,6 +2,8 @@ package claude
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestExtractLastActivity(t *testing.T) {
@@ -45,9 +47,7 @@ func TestExtractLastActivity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := extractLastActivity(tt.input)
-			if got != tt.expect {
-				t.Errorf("extractLastActivity() = %q, want %q", got, tt.expect)
-			}
+			assert.Equal(t, tt.expect, got)
 		})
 	}
 }
@@ -88,9 +88,7 @@ func TestIsWaitingForInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isWaitingForInput(tt.input)
-			if got != tt.expect {
-				t.Errorf("isWaitingForInput() = %v, want %v", got, tt.expect)
-			}
+			assert.Equal(t, tt.expect, got)
 		})
 	}
 }

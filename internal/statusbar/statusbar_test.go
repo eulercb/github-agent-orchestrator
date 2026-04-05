@@ -2,6 +2,8 @@ package statusbar
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestProviderFallback(t *testing.T) {
@@ -13,21 +15,15 @@ func TestProviderFallback(t *testing.T) {
 
 	p.Refresh()
 
-	if !called {
-		t.Error("fallback function was not called")
-	}
-	if got := p.Text(); got != "fallback text" {
-		t.Errorf("unexpected text: %q", got)
-	}
+	assert.True(t, called, "fallback function was not called")
+	assert.Equal(t, "fallback text", p.Text())
 }
 
 func TestProviderCommand(t *testing.T) {
 	p := NewProvider("echo hello", nil)
 	p.Refresh()
 
-	if got := p.Text(); got != "hello" {
-		t.Errorf("expected 'hello', got %q", got)
-	}
+	assert.Equal(t, "hello", p.Text())
 }
 
 func TestProviderCommandFailsFallsBack(t *testing.T) {
@@ -36,7 +32,5 @@ func TestProviderCommandFailsFallsBack(t *testing.T) {
 	})
 	p.Refresh()
 
-	if got := p.Text(); got != "fallback" {
-		t.Errorf("expected 'fallback', got %q", got)
-	}
+	assert.Equal(t, "fallback", p.Text())
 }
