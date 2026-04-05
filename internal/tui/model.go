@@ -266,8 +266,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case tickMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.fetchPRs()
-		prListCmd := m.fetchPRList()
-		return m, tea.Batch(filterCmd, m.tickCmd(), cmd, prListCmd, m.refreshStatusBar())
+		cmds := []tea.Cmd{filterCmd, m.tickCmd(), cmd, m.refreshStatusBar()}
+		if m.activePanel == PanelPRs {
+			cmds = append(cmds, m.fetchPRList())
+		}
+		return m, tea.Batch(cmds...)
 	case errMsg:
 		m.errorMsg = msg.err.Error()
 		return m, filterCmd
@@ -498,10 +501,10 @@ func (m *Model) selectedPR() *github.PullRequest {
 	return nil
 }
 
-func (m *Model) findSessionByBranch(branch string) *claude.Session {
+func (m *Model) findSessionByRepoBranch(repo, branch string) *claude.Session {
 	sessions := m.sessions.Sessions()
 	for i := range sessions {
-		if sessions[i].Branch == branch {
+		if sessions[i].Repo == repo && sessions[i].Branch == branch {
 			sess := sessions[i]
 			return &sess
 		}
@@ -731,8 +734,12 @@ func (m *Model) clearSessionForPR() {
 	if pr == nil {
 		return
 	}
+	repo := m.currentRepo()
+	if repo == nil {
+		return
+	}
 
-	sess := m.findSessionByBranch(pr.HeadRef)
+	sess := m.findSessionByRepoBranch(repo.FullName(), pr.HeadRef)
 	if sess == nil {
 		m.errorMsg = fmt.Sprintf("No session found for PR #%d", pr.Number)
 		return

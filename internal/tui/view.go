@@ -398,8 +398,10 @@ func (m *Model) renderPRsPanel(maxHeight int) string {
 func (m *Model) renderPRListLine(pr *github.PullRequest, selected bool) string {
 	// Session indicator
 	indicator := "  "
-	if sess := m.findSessionByBranch(pr.HeadRef); sess != nil {
-		indicator = "● "
+	if repo := m.currentRepo(); repo != nil {
+		if sess := m.findSessionByRepoBranch(repo.FullName(), pr.HeadRef); sess != nil {
+			indicator = "● "
+		}
 	}
 
 	number := fmt.Sprintf("#%-5d", pr.Number)
