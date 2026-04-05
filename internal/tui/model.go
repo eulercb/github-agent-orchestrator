@@ -579,10 +579,11 @@ func (m *Model) openInBrowser() tea.Cmd {
 		if issue == nil {
 			return nil
 		}
-		url := issue.URL
+		repo := issue.Repository.NameWithOwner
+		number := issue.Number
 		ghClient := m.gh
 		return func() tea.Msg {
-			return openBrowserMsg{err: ghClient.OpenInBrowser(url)}
+			return openBrowserMsg{err: ghClient.OpenInBrowser(repo, number)}
 		}
 	case PanelSessions:
 		sess := m.selectedSession()
@@ -591,10 +592,11 @@ func (m *Model) openInBrowser() tea.Cmd {
 		}
 		pr, ok := m.prCache[prCacheKey(sess.Repo, sess.Branch)]
 		if ok && pr != nil {
-			url := pr.URL
+			repo := sess.Repo
+			number := pr.Number
 			ghClient := m.gh
 			return func() tea.Msg {
-				return openBrowserMsg{err: ghClient.OpenInBrowser(url)}
+				return openBrowserMsg{err: ghClient.OpenInBrowser(repo, number)}
 			}
 		}
 	}
