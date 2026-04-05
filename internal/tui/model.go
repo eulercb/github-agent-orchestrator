@@ -150,11 +150,16 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
-	// When the filter input is active, forward all messages to the
-	// textinput (cursor blink, window resize, etc.) but intercept
-	// Enter/Esc key messages first.
+	// When the filter input is active, intercept key events for
+	// Enter/Esc/text input. Non-key messages (ticks, async loads,
+	// window resizes) fall through to the main switch so background
+	// refreshes continue and ticks are rescheduled.
 	if m.currentView == ViewFilter {
-		return m.updateFilter(msg)
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return m.updateFilter(msg)
+		}
+		// Forward non-key messages to textinput too (cursor blink).
+		m.filterInput, _ = m.filterInput.Update(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -310,8 +315,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			inputWidth = 20
 		}
 		m.filterInput.Width = inputWidth
-		// If no search query is set but individual config filters exist,
-		// synthesize a query so the user can see (and edit) what's active.
+		// Pre-populate the editor with the current search query
+		// so the user can review and edit the active filter.
 		if repo := m.currentRepo(); repo != nil && m.filterInput.Value() == "" {
 			m.filterInput.SetValue(repo.Filters.Search)
 		}
@@ -338,8 +343,6 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			query := strings.TrimSpace(m.filterInput.Value())
 			repo := m.currentRepo()
 			if repo != nil {
-				// Set Search; individual filters are preserved and will
-				// re-apply if the user later clears the search query.
 				repo.Filters.Search = query
 			}
 			m.loading = true
@@ -471,8 +474,14 @@ func (m *Model) spawnSession() tea.Cmd {
 		return nil
 	}
 
+	// Use the issue's own repo when available (search results carry it).
+	issueRepo := issue.Repository.NameWithOwner
+	if issueRepo == "" {
+		issueRepo = repo.IssueRepoFullName()
+	}
+
 	// Check if session already exists for this issue
-	existing := m.sessions.FindByIssue(repo.IssueRepoFullName(), issue.Number)
+	existing := m.sessions.FindByIssue(issueRepo, issue.Number)
 	if existing != nil {
 		m.errorMsg = fmt.Sprintf("Session already exists for issue #%d", issue.Number)
 		return nil

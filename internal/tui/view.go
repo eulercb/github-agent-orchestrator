@@ -184,10 +184,7 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 
 	number := fmt.Sprintf("#%-5d", issue.Number)
 	title := issue.Title
-	maxTitleLen := m.width - 33 - len([]rune(issue.Repository.NameWithOwner))
-	if repoPrefix != "" {
-		maxTitleLen -= 1 // space after repo name
-	}
+	maxTitleLen := m.width - 33 - lipgloss.Width(repoPrefix)
 	if maxTitleLen < 0 {
 		maxTitleLen = 0
 	}

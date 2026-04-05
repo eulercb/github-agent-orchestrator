@@ -75,7 +75,7 @@ func NewClient() *Client {
 func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 	query := repo.Filters.Search
 	if query == "" {
-		return nil, nil
+		return nil, fmt.Errorf("no issue filter configured — press / in the dashboard or set filters.search in config")
 	}
 	if !hasTypeQualifier(query) {
 		query = "is:issue " + query
