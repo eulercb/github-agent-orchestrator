@@ -69,6 +69,7 @@ type Model struct {
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
+	prFilter      string
 	filterInput   textinput.Model
 }
 
@@ -344,6 +345,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(m.fetchIssues(), m.fetchPRList(), m.refreshStatuses())
 	case key.Matches(msg, m.keys.Filter):
+		if m.activePanel == PanelSessions {
+			break
+		}
 		m.currentView = ViewFilter
 		// Size the input to fit the bordered box (minus padding and borders).
 		inputWidth := m.width - 10
@@ -351,12 +355,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			inputWidth = 20
 		}
 		m.filterInput.Width = inputWidth
-		// Always sync the editor with the current active search so it
-		// reflects the latest value (even after repo switches or edits).
-		if repo := m.currentRepo(); repo != nil {
-			m.filterInput.SetValue(repo.Filters.Search)
-		} else {
-			m.filterInput.SetValue("")
+		// Populate the editor with the current filter for the active panel.
+		switch m.activePanel {
+		case PanelPRs:
+			m.filterInput.SetValue(m.prFilter)
+		default:
+			if repo := m.currentRepo(); repo != nil {
+				m.filterInput.SetValue(repo.Filters.Search)
+			} else {
+				m.filterInput.SetValue("")
+			}
 		}
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()
@@ -375,15 +383,21 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
 		case tea.KeyEnter:
-			// Apply the filter and refresh issues.
+			// Apply the filter and refresh the active panel's data.
 			m.currentView = ViewDashboard
 			m.filterInput.Blur()
 			query := strings.TrimSpace(m.filterInput.Value())
+			m.loading = true
+			if m.activePanel == PanelPRs {
+				m.prFilter = query
+				m.prCursor = 0
+				cmd := m.fetchPRList()
+				return m, cmd
+			}
 			repo := m.currentRepo()
 			if repo != nil {
 				repo.Filters.Search = query
 			}
-			m.loading = true
 			m.issuesCursor = 0
 			cmd := m.fetchIssues()
 			return m, cmd
@@ -391,7 +405,9 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Cancel: restore the previous value.
 			m.currentView = ViewDashboard
 			m.filterInput.Blur()
-			if repo := m.currentRepo(); repo != nil {
+			if m.activePanel == PanelPRs {
+				m.filterInput.SetValue(m.prFilter)
+			} else if repo := m.currentRepo(); repo != nil {
 				m.filterInput.SetValue(repo.Filters.Search)
 			}
 			return m, nil
@@ -507,12 +523,13 @@ func (m *Model) fetchIssues() tea.Cmd {
 }
 
 func (m *Model) fetchPRList() tea.Cmd {
+	search := m.prFilter
 	return func() tea.Msg {
 		repo := m.currentRepo()
 		if repo == nil {
 			return prListLoadedMsg{err: fmt.Errorf("no repos configured")}
 		}
-		prs, err := m.gh.ListPRs(repo.FullName())
+		prs, err := m.gh.ListPRs(repo.FullName(), search)
 		return prListLoadedMsg{prs: prs, err: err}
 	}
 }

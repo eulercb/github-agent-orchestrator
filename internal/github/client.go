@@ -148,12 +148,16 @@ func hasTypeQualifier(query string) bool {
 }
 
 // ListPRs fetches pull requests for a repository using "gh pr list".
-func (c *Client) ListPRs(repoFullName string) ([]PullRequest, error) {
+// The search parameter is passed to --search when non-empty.
+func (c *Client) ListPRs(repoFullName, search string) ([]PullRequest, error) {
 	args := []string{"pr", "list",
 		"--repo", repoFullName,
 		"--state", "open",
 		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
 		"--limit", "50",
+	}
+	if search != "" {
+		args = append(args, "--search", search)
 	}
 
 	out, err := runGH(args...)

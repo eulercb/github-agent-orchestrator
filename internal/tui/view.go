@@ -345,6 +345,24 @@ func (m *Model) renderPRsPanel(maxHeight int) string {
 	if m.loading {
 		header += styles.MutedText.Render(" (loading...)")
 	}
+	if m.prFilter != "" {
+		filterText := m.prFilter
+		maxFilterLen := m.width - lipgloss.Width(header) - 8
+		if maxFilterLen < 0 {
+			maxFilterLen = 0
+		}
+		filterRunes := []rune(filterText)
+		if len(filterRunes) > maxFilterLen {
+			if maxFilterLen > 0 {
+				filterText = string(filterRunes[:maxFilterLen]) + "..."
+			} else {
+				filterText = ""
+			}
+		}
+		if filterText != "" {
+			header += styles.MutedText.Render("  / " + filterText)
+		}
+	}
 
 	var lines []string
 	lines = append(lines, header)
@@ -466,7 +484,7 @@ func (m *Model) renderHelpBar() string {
 	case PanelSessions:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
 	case PanelPRs:
-		items = []string{"↑↓ navigate", "tab switch", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
@@ -510,8 +528,14 @@ func (m *Model) viewHelp() string {
 }
 
 func (m *Model) viewFilter() string {
-	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:@me  label:bug  repo:org/repo  user:my-org\n",
-		m.filterInput.View())
+	title := "Issue Filter (GitHub search syntax)"
+	examples := "is:open  assignee:@me  label:bug  repo:org/repo  user:my-org"
+	if m.activePanel == PanelPRs {
+		title = "PR Filter (GitHub search syntax)"
+		examples = "review:approved  author:@me  label:bug  draft:false"
+	}
+	content := fmt.Sprintf("\n  %s\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: %s\n",
+		title, m.filterInput.View(), examples)
 	width := m.width - 4
 	if width < 0 {
 		width = 0
