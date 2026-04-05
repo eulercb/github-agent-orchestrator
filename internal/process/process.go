@@ -99,6 +99,9 @@ func isNoSuchProcess(err error) bool {
 }
 
 // ReadLastLines reads the last n lines from a file by seeking near the end.
+// It reads a fixed 4096-byte tail, which is sufficient for the typical use
+// case of capturing the last few lines for status detection. If individual
+// lines exceed ~800 bytes, fewer than n lines may be returned.
 func ReadLastLines(path string, n int) (string, error) {
 	f, err := os.Open(path) //nolint:gosec // log path is derived from config dir
 	if err != nil {
