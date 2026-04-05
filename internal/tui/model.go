@@ -25,6 +25,7 @@ type Panel int
 const (
 	PanelIssues Panel = iota
 	PanelSessions
+	PanelPRs
 )
 
 // View identifies the current screen.
@@ -57,9 +58,11 @@ type Model struct {
 	currentView   View
 	activePanel   Panel
 	issues        []github.Issue
+	prList        []github.PullRequest
 	prCache       map[string]*github.PullRequest // "repo:branch" -> PR
 	issuesCursor  int
 	sessionCursor int
+	prCursor      int
 	repoIndex     int
 	statusBarText string
 	errorMsg      string
@@ -113,6 +116,11 @@ type prsLoadedMsg struct {
 	err error
 }
 
+type prListLoadedMsg struct {
+	prs []github.PullRequest
+	err error
+}
+
 type statusRefreshMsg struct{}
 
 type statusBarUpdatedMsg struct {
@@ -143,6 +151,7 @@ type errMsg struct {
 func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface requires value receiver
 	return tea.Batch(
 		m.fetchIssues(),
+		m.fetchPRList(),
 		m.refreshStatuses(),
 		m.tickCmd(),
 	)
@@ -203,6 +212,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.errorMsg = ""
 		}
 		return m, filterCmd
+	case prListLoadedMsg:
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("PR list refresh: %v", msg.err)
+		} else {
+			m.prList = msg.prs
+			m.errorMsg = ""
+			lastIdx := len(m.prList) - 1
+			if lastIdx < 0 {
+				lastIdx = 0
+			}
+			if m.prCursor > lastIdx {
+				m.prCursor = lastIdx
+			}
+		}
+		return m, filterCmd
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.refreshStatusBar()
@@ -241,7 +265,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case tickMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.fetchPRs()
-		return m, tea.Batch(filterCmd, m.tickCmd(), cmd, m.refreshStatusBar())
+		prListCmd := m.fetchPRList()
+		return m, tea.Batch(filterCmd, m.tickCmd(), cmd, prListCmd, m.refreshStatusBar())
 	case errMsg:
 		m.errorMsg = msg.err.Error()
 		return m, filterCmd
@@ -282,9 +307,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Help):
 		m.currentView = ViewHelp
 	case key.Matches(msg, m.keys.Tab):
-		if m.activePanel == PanelIssues {
+		switch m.activePanel {
+		case PanelIssues:
 			m.activePanel = PanelSessions
-		} else {
+		case PanelSessions:
+			m.activePanel = PanelPRs
+		case PanelPRs:
 			m.activePanel = PanelIssues
 		}
 	case key.Matches(msg, m.keys.Up):
@@ -308,9 +336,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.activePanel == PanelSessions {
 			m.killSession()
 		}
+	case key.Matches(msg, m.keys.ClearSession):
+		if m.activePanel == PanelPRs {
+			m.clearSessionForPR()
+		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
-		return m, tea.Batch(m.fetchIssues(), m.refreshStatuses())
+		return m, tea.Batch(m.fetchIssues(), m.fetchPRList(), m.refreshStatuses())
 	case key.Matches(msg, m.keys.Filter):
 		m.currentView = ViewFilter
 		// Size the input to fit the bordered box (minus padding and borders).
@@ -406,6 +438,18 @@ func (m *Model) moveCursor(delta int) {
 		if m.sessionCursor > lastIdx {
 			m.sessionCursor = lastIdx
 		}
+	case PanelPRs:
+		m.prCursor += delta
+		if m.prCursor < 0 {
+			m.prCursor = 0
+		}
+		lastIdx := len(m.prList) - 1
+		if lastIdx < 0 {
+			lastIdx = 0
+		}
+		if m.prCursor > lastIdx {
+			m.prCursor = lastIdx
+		}
 	}
 }
 
@@ -431,6 +475,24 @@ func (m *Model) selectedSession() *claude.Session {
 	return nil
 }
 
+func (m *Model) selectedPR() *github.PullRequest {
+	if m.prCursor >= 0 && m.prCursor < len(m.prList) {
+		return &m.prList[m.prCursor]
+	}
+	return nil
+}
+
+func (m *Model) findSessionByBranch(branch string) *claude.Session {
+	sessions := m.sessions.Sessions()
+	for i := range sessions {
+		if sessions[i].Branch == branch {
+			sess := sessions[i]
+			return &sess
+		}
+	}
+	return nil
+}
+
 // Commands
 
 func (m *Model) fetchIssues() tea.Cmd {
@@ -441,6 +503,17 @@ func (m *Model) fetchIssues() tea.Cmd {
 		}
 		issues, err := m.gh.ListIssues(repo.Filters.Search)
 		return issuesLoadedMsg{issues: issues, err: err}
+	}
+}
+
+func (m *Model) fetchPRList() tea.Cmd {
+	return func() tea.Msg {
+		repo := m.currentRepo()
+		if repo == nil {
+			return prListLoadedMsg{err: fmt.Errorf("no repos configured")}
+		}
+		prs, err := m.gh.ListPRs(repo.FullName())
+		return prListLoadedMsg{prs: prs, err: err}
 	}
 }
 
@@ -602,6 +675,21 @@ func (m *Model) openInBrowser() tea.Cmd {
 				return openBrowserMsg{err: ghClient.OpenInBrowser(repo, number)}
 			}
 		}
+	case PanelPRs:
+		pr := m.selectedPR()
+		if pr == nil {
+			return nil
+		}
+		repo := m.currentRepo()
+		if repo == nil {
+			return nil
+		}
+		repoName := repo.FullName()
+		number := pr.Number
+		ghClient := m.gh
+		return func() tea.Msg {
+			return openBrowserMsg{err: ghClient.OpenInBrowser(repoName, number)}
+		}
 	}
 	return nil
 }
@@ -614,6 +702,27 @@ func (m *Model) killSession() {
 
 	sessID := sess.ID
 	m.confirmMsg = fmt.Sprintf("Kill session %q? (y/n)", sess.ID)
+	m.currentView = ViewConfirm
+	m.confirmAction = func() tea.Msg {
+		err := m.sessions.RemoveSession(sessID, true)
+		return sessionKilledMsg{id: sessID, err: err}
+	}
+}
+
+func (m *Model) clearSessionForPR() {
+	pr := m.selectedPR()
+	if pr == nil {
+		return
+	}
+
+	sess := m.findSessionByBranch(pr.HeadRef)
+	if sess == nil {
+		m.errorMsg = fmt.Sprintf("No session found for PR #%d", pr.Number)
+		return
+	}
+
+	sessID := sess.ID
+	m.confirmMsg = fmt.Sprintf("Clear session %q for PR #%d? (y/n)", sess.ID, pr.Number)
 	m.currentView = ViewConfirm
 	m.confirmAction = func() tea.Msg {
 		err := m.sessions.RemoveSession(sessID, true)

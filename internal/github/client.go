@@ -43,13 +43,15 @@ type User struct {
 
 // PullRequest represents a GitHub pull request.
 type PullRequest struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	State          string `json:"state"`
-	URL            string `json:"url"`
-	Draft          bool   `json:"isDraft"`
-	HeadRef        string `json:"headRefName"`
-	ReviewDecision string `json:"reviewDecision"`
+	Number         int     `json:"number"`
+	Title          string  `json:"title"`
+	State          string  `json:"state"`
+	URL            string  `json:"url"`
+	Draft          bool    `json:"isDraft"`
+	HeadRef        string  `json:"headRefName"`
+	ReviewDecision string  `json:"reviewDecision"`
+	Author         User    `json:"author"`
+	Labels         []Label `json:"labels"`
 }
 
 // PRStatus summarizes the state of a PR for display.
@@ -145,13 +147,34 @@ func hasTypeQualifier(query string) bool {
 	return false
 }
 
+// ListPRs fetches pull requests for a repository using "gh pr list".
+func (c *Client) ListPRs(repoFullName string) ([]PullRequest, error) {
+	args := []string{"pr", "list",
+		"--repo", repoFullName,
+		"--state", "open",
+		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
+		"--limit", "50",
+	}
+
+	out, err := runGH(args...)
+	if err != nil {
+		return nil, fmt.Errorf("list PRs for %s: %w", repoFullName, err)
+	}
+
+	var prs []PullRequest
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, fmt.Errorf("parse PR list: %w", err)
+	}
+	return prs, nil
+}
+
 // FindPRForBranch looks for a PR with the given head branch.
 func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, error) {
 	args := []string{"pr", "list",
 		"--repo", repoFullName,
 		"--head", branch,
 		"--state", "all",
-		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision",
+		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
 		"--limit", "1",
 	}
 

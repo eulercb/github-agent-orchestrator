@@ -49,8 +49,9 @@ func (m *Model) viewDashboard() string {
 		contentHeight--
 	}
 
-	issueHeight := contentHeight / 2
-	sessionHeight := contentHeight - issueHeight
+	issueHeight := contentHeight / 3
+	sessionHeight := contentHeight / 3
+	prHeight := contentHeight - issueHeight - sessionHeight
 
 	// Issues panel
 	issuesContent := m.renderIssuesPanel(issueHeight)
@@ -59,6 +60,10 @@ func (m *Model) viewDashboard() string {
 	// Sessions panel
 	sessionsContent := m.renderSessionsPanel(sessionHeight)
 	sections = append(sections, sessionsContent)
+
+	// Pull Requests panel
+	prsContent := m.renderPRsPanel(prHeight)
+	sections = append(sections, prsContent)
 
 	// Status bar
 	statusBar := m.renderStatusBar()
@@ -328,6 +333,97 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	return styles.NormalItem.Width(m.width).Render(content)
 }
 
+func (m *Model) renderPRsPanel(maxHeight int) string {
+	panelActive := m.activePanel == PanelPRs
+
+	titleStyle := styles.SectionTitle
+	if panelActive {
+		titleStyle = titleStyle.Foreground(styles.Primary)
+	}
+
+	header := titleStyle.Render("Pull Requests")
+	if m.loading {
+		header += styles.MutedText.Render(" (loading...)")
+	}
+
+	var lines []string
+	lines = append(lines, header)
+
+	if len(m.prList) == 0 {
+		lines = append(lines, styles.MutedText.Render("  No open pull requests"))
+	}
+
+	visibleCount := maxHeight - 2
+	if visibleCount < 1 {
+		visibleCount = 1
+	}
+
+	// Scrolling window
+	start := 0
+	if m.prCursor >= visibleCount {
+		start = m.prCursor - visibleCount + 1
+	}
+	end := start + visibleCount
+	if end > len(m.prList) {
+		end = len(m.prList)
+	}
+
+	for i := start; i < end; i++ {
+		selected := panelActive && i == m.prCursor
+		line := m.renderPRListLine(&m.prList[i], selected)
+		lines = append(lines, line)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func (m *Model) renderPRListLine(pr *github.PullRequest, selected bool) string {
+	// Session indicator
+	indicator := "  "
+	if sess := m.findSessionByBranch(pr.HeadRef); sess != nil {
+		indicator = "● "
+	}
+
+	number := fmt.Sprintf("#%-5d", pr.Number)
+
+	// PR status badge
+	statusStr := m.renderPRStatus(pr)
+
+	// Title with truncation
+	maxTitleLen := m.width - 40 - lipgloss.Width(statusStr)
+	if maxTitleLen < 10 {
+		maxTitleLen = 10
+	}
+	title := pr.Title
+	titleRunes := []rune(title)
+	if len(titleRunes) > maxTitleLen {
+		title = string(titleRunes[:maxTitleLen]) + "..."
+	}
+
+	// Author
+	authorStr := ""
+	if pr.Author.Login != "" {
+		authorStr = styles.MutedText.Render(" @" + pr.Author.Login)
+	}
+
+	// Labels
+	var labels []string
+	for _, l := range pr.Labels {
+		labels = append(labels, l.Name)
+	}
+	labelStr := ""
+	if len(labels) > 0 {
+		labelStr = styles.MutedText.Render(" [" + strings.Join(labels, ", ") + "]")
+	}
+
+	content := fmt.Sprintf("%s%s %s  %s%s%s", indicator, number, title, statusStr, authorStr, labelStr)
+
+	if selected {
+		return styles.SelectedItem.Width(m.width).Render(content)
+	}
+	return styles.NormalItem.Width(m.width).Render(content)
+}
+
 func (m *Model) renderPRStatus(pr *github.PullRequest) string {
 	status := m.gh.GetPRStatus(pr)
 
@@ -364,10 +460,13 @@ func (m *Model) renderStatusBar() string {
 
 func (m *Model) renderHelpBar() string {
 	var items []string
-	if m.activePanel == PanelIssues {
+	switch m.activePanel {
+	case PanelIssues:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "o open", "r refresh", "? help", "q quit"}
-	} else {
+	case PanelSessions:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
+	case PanelPRs:
+		items = []string{"↑↓ navigate", "tab switch", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
@@ -383,7 +482,7 @@ func (m *Model) viewHelp() string {
 
   Navigation:
     ↑/k, ↓/j    Move cursor up/down
-    Tab          Switch between Issues and Sessions panels
+    Tab          Switch between Issues, Sessions, and PRs panels
     Esc          Go back
 
   Actions:
@@ -392,7 +491,8 @@ func (m *Model) viewHelp() string {
     a            Attach to selected session (opens interactive Claude)
     o            Open issue/PR in browser
     x            Kill selected session
-    r            Refresh issues and session statuses
+    c            Clear session for selected PR (in PRs panel)
+    r            Refresh issues, PRs, and session statuses
 
   Other:
     ?            Toggle this help screen
