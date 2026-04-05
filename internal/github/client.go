@@ -78,9 +78,11 @@ func (c *Client) ListIssues(repo *config.RepoConfig) ([]Issue, error) {
 	}
 
 	if repo.Filters.Search != "" {
-		// Raw search query mode: pass the query directly and set state
-		// to "all" so gh doesn't add its own implicit "is:open" filter.
-		args = append(args, "--search", repo.Filters.Search, "--state", "all")
+		// Raw search query mode: pass the query directly.
+		// Don't add --state; the user controls it via search syntax
+		// (e.g. "is:open"). Adding --state could conflict with or
+		// override the search query depending on the gh version.
+		args = append(args, "--search", repo.Filters.Search)
 	} else {
 		if repo.Filters.Assignee != "" {
 			args = append(args, "--assignee", repo.Filters.Assignee)
