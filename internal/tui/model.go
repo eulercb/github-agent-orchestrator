@@ -150,19 +150,19 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 
 // Update handles messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // tea.Model interface requires value receiver
-	// When the filter input is active, intercept key events for
-	// Enter/Esc/text input. Non-key messages (ticks, async loads,
-	// window resizes) fall through to the main switch so background
+	// When the filter input is active, intercept key events and window
+	// resizes for the filter editor. All other messages (ticks, async
+	// loads, status updates) fall through to the main switch so background
 	// refreshes continue and ticks are rescheduled.
+	var filterCmd tea.Cmd
 	if m.currentView == ViewFilter {
 		switch msg.(type) {
 		case tea.KeyMsg, tea.WindowSizeMsg:
 			return m.updateFilter(msg)
 		default:
-			// Forward non-key messages to textinput (cursor blink, timers).
-			var cmd tea.Cmd
-			m.filterInput, cmd = m.filterInput.Update(msg)
-			return m, cmd
+			// Forward to textinput for cursor blink / internal timers,
+			// then fall through to the main switch below.
+			m.filterInput, filterCmd = m.filterInput.Update(msg)
 		}
 	}
 
@@ -172,7 +172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
+		return m, filterCmd
 	case issuesLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -190,7 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			}
 		}
 		cmd := m.fetchPRs()
-		return m, cmd
+		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
@@ -202,14 +202,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.prCache = msg.prs
 			m.errorMsg = ""
 		}
-		return m, nil
+		return m, filterCmd
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.refreshStatusBar()
-		return m, cmd
+		return m, tea.Batch(filterCmd, cmd)
 	case statusBarUpdatedMsg:
 		m.statusBarText = msg.text
-		return m, nil
+		return m, filterCmd
 	case sessionSpawnedMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Spawn failed: %v", msg.err)
@@ -217,7 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.errorMsg = ""
 			m.activePanel = PanelSessions
 		}
-		return m, nil
+		return m, filterCmd
 	case sessionKilledMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Kill failed: %v", msg.err)
@@ -232,21 +232,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 				m.sessionCursor = lastIdx
 			}
 		}
-		return m, nil
+		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
 		}
-		return m, nil
+		return m, filterCmd
 	case tickMsg:
 		m.sessions.RefreshStatuses()
 		cmd := m.fetchPRs()
-		return m, tea.Batch(m.tickCmd(), cmd, m.refreshStatusBar())
+		return m, tea.Batch(filterCmd, m.tickCmd(), cmd, m.refreshStatusBar())
 	case errMsg:
 		m.errorMsg = msg.err.Error()
-		return m, nil
+		return m, filterCmd
 	}
-	return m, nil
+	return m, filterCmd
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
