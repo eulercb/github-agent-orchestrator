@@ -315,16 +315,27 @@ func (m *Manager) setupBranch(repoDir, branch string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
 
-	// Try checking out existing branch first
+	// Try checking out existing branch first.
 	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
 	cmd.Dir = repoDir
-	if err := cmd.Run(); err != nil {
-		// Branch doesn't exist, create it
-		createCmd := exec.CommandContext(ctx, "git", "checkout", "-b", branch)
-		createCmd.Dir = repoDir
-		if out, err := createCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git checkout -b %s: %s (%w)", branch, strings.TrimSpace(string(out)), err)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		checkoutOutput := strings.TrimSpace(string(out))
+
+		// Only create the branch if it truly does not exist locally.
+		verifyCmd := exec.CommandContext(ctx, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+		verifyCmd.Dir = repoDir
+		if verifyErr := verifyCmd.Run(); verifyErr != nil {
+			// Branch does not exist — create it.
+			createCmd := exec.CommandContext(ctx, "git", "checkout", "-b", branch)
+			createCmd.Dir = repoDir
+			if createOut, createErr := createCmd.CombinedOutput(); createErr != nil {
+				return fmt.Errorf("git checkout -b %s: %s (%w)", branch, strings.TrimSpace(string(createOut)), createErr)
+			}
+			return nil
 		}
+
+		// Branch exists but checkout failed for another reason (e.g. uncommitted changes).
+		return fmt.Errorf("git checkout %s: %s (%w)", branch, checkoutOutput, err)
 	}
 
 	return nil

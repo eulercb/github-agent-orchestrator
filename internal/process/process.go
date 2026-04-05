@@ -60,16 +60,25 @@ func IsRunning(pid int) bool {
 }
 
 // Kill sends SIGTERM to the process group for the given PID.
+// It verifies the PGID before sending a group-wide signal to avoid
+// accidentally killing unrelated processes if the PID was reused.
 func Kill(pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid pid %d", pid)
 	}
-	// Kill the entire process group (negative PID targets the group).
-	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
-		// Fall back to killing just the process itself.
-		if err2 := syscall.Kill(pid, syscall.SIGTERM); err2 != nil {
-			return fmt.Errorf("kill process %d: %w", pid, err2)
+
+	// Only target a process group when the PID still resolves to the
+	// expected group leader. This avoids sending a group-wide signal based
+	// solely on a potentially stale stored PID.
+	if pgid, err := syscall.Getpgid(pid); err == nil && pgid == pid {
+		if err := syscall.Kill(-pgid, syscall.SIGTERM); err == nil {
+			return nil
 		}
+	}
+
+	// Fall back to killing just the process itself.
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		return fmt.Errorf("kill process %d: %w", pid, err)
 	}
 	return nil
 }

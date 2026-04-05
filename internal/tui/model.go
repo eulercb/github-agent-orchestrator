@@ -434,7 +434,7 @@ func (m *Model) attachSession() tea.Cmd {
 		}
 	}
 
-	// Use configurable attach command or default to spawn command in worktree
+	// Launch the spawn command interactively in the session's worktree
 	attachCmd := m.resolveAttachCommand(workDir)
 
 	return tea.ExecProcess(
