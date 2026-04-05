@@ -368,7 +368,7 @@ func (m *Model) viewHelp() string {
 }
 
 func (m *Model) viewFilter() string {
-	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:eulercb  label:bug  archived:false  user:my-company\n",
+	content := fmt.Sprintf("\n  Issue Filter (GitHub search syntax)\n\n  %s\n\n  Enter to apply, Esc to cancel.\n  Examples: is:open  assignee:@me  label:bug  archived:false  user:my-org\n",
 		m.filterInput.View())
 	width := m.width - 4
 	if width < 0 {

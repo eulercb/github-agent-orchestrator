@@ -93,7 +93,7 @@ func run() error {
 			fmt.Println("      assignee: '@me'")
 			fmt.Println("      state: open")
 			fmt.Println("      # Or use a GitHub search query instead:")
-			fmt.Println("      # search: 'is:open assignee:eulercb archived:false'")
+			fmt.Println("      # search: 'is:open assignee:@me archived:false'")
 			fmt.Println()
 			return nil
 		}
@@ -171,7 +171,7 @@ func doInit() error {
 
 		assignee := prompt(scanner, "Issue assignee filter (blank for all, @me for yourself)", "@me")
 		state := prompt(scanner, "Issue state filter (open, closed, all)", "open")
-		search := prompt(scanner, "GitHub search query (blank to use assignee/state above, e.g. \"is:open assignee:eulercb archived:false\")", "")
+		search := prompt(scanner, "GitHub search query (blank to use assignee/state above, e.g. \"is:open assignee:@me archived:false\")", "")
 
 		repo := config.RepoConfig{
 			Owner: owner,

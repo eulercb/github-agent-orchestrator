@@ -63,7 +63,7 @@ func (r *RepoConfig) IssueRepoFullName() string {
 // IssueFilters controls which issues are shown.
 // When Search is set, it is passed to "gh issue list --search" and the individual
 // filter fields (Assignee, Labels, State) are ignored because GitHub's search
-// syntax subsumes them (e.g. "is:open assignee:eulercb label:bug").
+// syntax subsumes them (e.g. "is:open assignee:@me label:bug").
 type IssueFilters struct {
 	Assignee string   `yaml:"assignee"`
 	Labels   []string `yaml:"labels"`

@@ -95,7 +95,7 @@ func TestSaveAndLoadWithSearch(t *testing.T) {
 			Owner: "testowner",
 			Name:  "testrepo",
 			Filters: IssueFilters{
-				Search: "is:open assignee:eulercb archived:false user:my-company",
+				Search: "is:open assignee:@me archived:false user:my-org",
 			},
 		},
 	}
@@ -113,7 +113,7 @@ func TestSaveAndLoadWithSearch(t *testing.T) {
 		t.Fatalf("expected 1 repo, got %d", len(loaded.Repos))
 	}
 
-	want := "is:open assignee:eulercb archived:false user:my-company"
+	want := "is:open assignee:@me archived:false user:my-org"
 	if loaded.Repos[0].Filters.Search != want {
 		t.Errorf("unexpected search filter: got %q, want %q", loaded.Repos[0].Filters.Search, want)
 	}

@@ -78,7 +78,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = "is:open assignee:eulercb archived:false"
+	ti.Placeholder = "is:open assignee:@me archived:false"
 	ti.CharLimit = 256
 
 	// Pre-populate with the current search filter from config.
