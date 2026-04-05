@@ -81,11 +81,15 @@ func (c *Client) ListIssues(search string) ([]Issue, error) {
 	if !hasTypeQualifier(query) {
 		query = "is:issue " + query
 	}
-	args := []string{"search", "issues",
-		query,
+	// Split the query into individual terms so each qualifier is passed as
+	// a separate positional argument to gh (gh search issues is:open is:issue ...)
+	// rather than a single quoted string.
+	args := []string{"search", "issues"}
+	args = append(args, strings.Fields(query)...)
+	args = append(args,
 		"--json", "number,title,state,url,labels,assignees,body,author,repository",
 		"--limit", "50",
-	}
+	)
 
 	out, err := runGH(args...)
 	if err != nil {
