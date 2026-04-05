@@ -155,11 +155,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	// window resizes) fall through to the main switch so background
 	// refreshes continue and ticks are rescheduled.
 	if m.currentView == ViewFilter {
-		if _, ok := msg.(tea.KeyMsg); ok {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg:
 			return m.updateFilter(msg)
+		default:
+			// Forward non-key messages to textinput too (cursor blink).
+			m.filterInput, _ = m.filterInput.Update(msg)
 		}
-		// Forward non-key messages to textinput too (cursor blink).
-		m.filterInput, _ = m.filterInput.Update(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -490,6 +492,18 @@ func (m *Model) spawnSession() tea.Cmd {
 	issueNum := issue.Number
 	issueTitle := issue.Title
 	repoCopy := *repo
+
+	// Override issue source so the session records the issue's actual repo,
+	// not the default config repo (matters for cross-repo search results).
+	if issueRepo != repo.IssueRepoFullName() {
+		parts := strings.SplitN(issueRepo, "/", 2)
+		if len(parts) == 2 {
+			repoCopy.IssueSource = &config.IssueSource{
+				Owner: parts[0],
+				Name:  parts[1],
+			}
+		}
+	}
 
 	return func() tea.Msg {
 		sess, err := m.sessions.SpawnSession(&repoCopy, issueNum, issueTitle)

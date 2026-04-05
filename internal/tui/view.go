@@ -126,6 +126,18 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 		}
 	}
 
+	// Determine if issues span multiple repos so we can show repo prefixes.
+	multiRepo := false
+	if len(m.issues) > 1 {
+		first := m.issues[0].Repository.NameWithOwner
+		for i := 1; i < len(m.issues); i++ {
+			if m.issues[i].Repository.NameWithOwner != first {
+				multiRepo = true
+				break
+			}
+		}
+	}
+
 	var lines []string
 	lines = append(lines, header)
 
@@ -151,14 +163,14 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	for i := start; i < end; i++ {
 		selected := panelActive && i == m.issuesCursor
 
-		line := m.renderIssueLine(&m.issues[i], selected)
+		line := m.renderIssueLine(&m.issues[i], selected, multiRepo)
 		lines = append(lines, line)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
+func (m *Model) renderIssueLine(issue *github.Issue, selected, multiRepo bool) string {
 	// Determine the issue's repo for session lookup.
 	// Search results carry their own Repository; fall back to the config repo.
 	issueRepo := issue.Repository.NameWithOwner
@@ -180,9 +192,9 @@ func (m *Model) renderIssueLine(issue *github.Issue, selected bool) string {
 		indicator = "● "
 	}
 
-	// Show repo name when issues come from search (multi-repo).
+	// Show repo name only when results span multiple repos.
 	repoPrefix := ""
-	if issue.Repository.NameWithOwner != "" {
+	if multiRepo && issue.Repository.NameWithOwner != "" {
 		repoPrefix = styles.MutedText.Render(issue.Repository.NameWithOwner) + " "
 	}
 
@@ -363,7 +375,7 @@ func (m *Model) renderHelpBar() string {
 func (m *Model) viewHelp() string {
 	cfgPath := m.cfgPath
 	if cfgPath == "" {
-		cfgPath = "~/.config/gao/config.yaml"
+		cfgPath = "(unknown)"
 	}
 
 	help := fmt.Sprintf(`
