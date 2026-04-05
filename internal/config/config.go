@@ -60,9 +60,14 @@ func (r *RepoConfig) IssueRepoFullName() string {
 	return owner + "/" + name
 }
 
+// DefaultSearch is the fallback issue filter used when no search query
+// is configured. It shows open issues assigned to the current user.
+const DefaultSearch = "is:open assignee:@me"
+
 // IssueFilters controls which issues are shown.
 // Search is passed to "gh search issues" and supports the full GitHub
 // search syntax (e.g. "is:open assignee:@me repo:org/repo label:bug").
+// When empty, DefaultSearch is used.
 type IssueFilters struct {
 	Search string `yaml:"search"`
 }
