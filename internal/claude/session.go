@@ -237,6 +237,62 @@ func (m *Manager) RefreshStatuses() {
 	}
 }
 
+// BackfillIssueTitles populates empty IssueTitle fields by looking up
+// linked issues via the GitHub API. Sessions whose titles are already
+// set or that have no branch are skipped.
+func (m *Manager) BackfillIssueTitles() {
+	if m.gh == nil {
+		return
+	}
+
+	m.mu.RLock()
+	type backfillEntry struct {
+		idx    int
+		repo   string
+		branch string
+	}
+	var entries []backfillEntry
+	for i := range m.sessions {
+		s := &m.sessions[i]
+		if s.IssueTitle == "" && s.Branch != "" && s.Repo != "" {
+			entries = append(entries, backfillEntry{idx: i, repo: s.Repo, branch: s.Branch})
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(entries) == 0 {
+		return
+	}
+
+	// Resolve titles outside the lock (makes network calls).
+	type resolved struct {
+		idx   int
+		title string
+	}
+	var results []resolved
+	for _, e := range entries {
+		linked, err := m.gh.FindLinkedIssue(e.repo, e.branch)
+		if err != nil || linked == nil || linked.Title == "" {
+			continue
+		}
+		results = append(results, resolved{idx: e.idx, title: linked.Title})
+	}
+
+	if len(results) == 0 {
+		return
+	}
+
+	m.mu.Lock()
+	for _, r := range results {
+		if r.idx < len(m.sessions) && m.sessions[r.idx].IssueTitle == "" {
+			m.sessions[r.idx].IssueTitle = r.title
+		}
+	}
+	m.mu.Unlock()
+
+	_ = m.saveState()
+}
+
 // RemoveSession removes a session from tracking and optionally kills the process.
 func (m *Manager) RemoveSession(id string, killProcess bool) error {
 	m.mu.Lock()

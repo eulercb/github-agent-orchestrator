@@ -153,6 +153,8 @@ type prsLoadedMsg struct {
 
 type statusRefreshMsg struct{}
 
+type titlesBackfilledMsg struct{}
+
 type statusBarUpdatedMsg struct {
 	text string
 }
@@ -314,11 +316,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 				}
 			}
 			m.errorMsg = fmt.Sprintf("Worktrees synced: %s", strings.Join(parts, ", "))
-			m.prFetches++
-			return m, tea.Batch(filterCmd, m.fetchPRs())
+		} else {
+			m.errorMsg = ""
 		}
-		m.errorMsg = ""
-		return m, filterCmd
+		// Always refresh PRs and backfill missing issue titles after sync.
+		m.prFetches++
+		return m, tea.Batch(filterCmd, m.fetchPRs(), m.backfillTitles())
+	case titlesBackfilledMsg:
+		return m, nil
 	case openBrowserMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
@@ -644,6 +649,14 @@ func (m *Model) fetchPRs() tea.Cmd {
 func (m *Model) refreshStatuses() tea.Cmd {
 	return func() tea.Msg {
 		return statusRefreshMsg{}
+	}
+}
+
+func (m *Model) backfillTitles() tea.Cmd {
+	sessMgr := m.sessions
+	return func() tea.Msg {
+		sessMgr.BackfillIssueTitles()
+		return titlesBackfilledMsg{}
 	}
 }
 
