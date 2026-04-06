@@ -234,7 +234,7 @@ func (m *Model) renderSessionsPanel(maxHeight int) string {
 	header := titleStyle.Render("Sessions")
 	if m.scanning {
 		header += styles.MutedText.Render(" (scanning worktrees...)")
-	} else if m.prFetches > 0 {
+	} else if m.loading {
 		header += styles.MutedText.Render(" (refreshing...)")
 	}
 	var lines []string
@@ -305,22 +305,29 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 
 	issueRef := fmt.Sprintf("#%-5d", sess.IssueNumber)
 
-	// Issue title or branch fallback (truncated)
-	issueTitle := sess.IssueTitle
-	if issueTitle == "" {
-		issueTitle = sess.Branch
-	}
-	issueTitleRunes := []rune(issueTitle)
-	if len(issueTitleRunes) > 30 {
-		issueTitle = string(issueTitleRunes[:27]) + "..."
-	}
-
 	statusStr := statusStyle.Render(fmt.Sprintf("%s %s", statusIcon, statusText))
 
 	// PR info
 	prStr := styles.MutedText.Render("—")
 	if pr, ok := m.prCache[prCacheKey(sess.Repo, sess.Branch)]; ok && pr != nil {
 		prStr = m.renderPRStatus(pr)
+	}
+
+	// Issue title or branch fallback — use remaining terminal width.
+	issueTitle := sess.IssueTitle
+	if issueTitle == "" {
+		issueTitle = sess.Branch
+	}
+	// Calculate space used by fixed columns:
+	// "  " + issueRef + " " + status + "  " + prStr + "  "
+	fixedWidth := 2 + lipgloss.Width(issueRef) + 1 + lipgloss.Width(statusStr) + 2 + lipgloss.Width(prStr) + 2
+	maxTitle := m.width - fixedWidth
+	if maxTitle < 10 {
+		maxTitle = 10
+	}
+	issueTitleRunes := []rune(issueTitle)
+	if len(issueTitleRunes) > maxTitle {
+		issueTitle = string(issueTitleRunes[:maxTitle-3]) + "..."
 	}
 
 	content := fmt.Sprintf("  %s %s  %s  %s", issueRef, statusStr, prStr, issueTitle)

@@ -67,7 +67,6 @@ type Model struct {
 	statusBarText string
 	errorMsg      string
 	scanning      bool
-	prFetches     int // number of in-flight PR fetch operations
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
@@ -241,14 +240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 				m.issuesCursor = lastIdx
 			}
 		}
-		m.prFetches++
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
-		m.prFetches--
-		if m.prFetches < 0 {
-			m.prFetches = 0
-		}
+		m.loading = false
 		if msg.err != nil {
 			// Preserve previously known PRs when some lookups fail,
 			// and merge in the successfully refreshed entries.
@@ -329,7 +324,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.errorMsg = ""
 		}
 		// Always refresh PRs and backfill missing issue titles after sync.
-		m.prFetches++
 		return m, tea.Batch(filterCmd, m.fetchPRs(), m.backfillTitles())
 	case titlesBackfilledMsg:
 		return m, filterCmd
@@ -340,7 +334,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		return m, filterCmd
 	case tickMsg:
 		m.sessions.RefreshStatuses()
-		m.prFetches++
 		cmd := m.fetchPRs()
 		cmds := []tea.Cmd{filterCmd, m.tickCmd(), cmd, m.refreshStatusBar()}
 		return m, tea.Batch(cmds...)
@@ -427,13 +420,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
-		cmds := []tea.Cmd{m.refreshStatuses()}
+		cmds := []tea.Cmd{m.refreshStatuses(), m.fetchPRs()}
 		if m.showIssues {
-			// fetchPRs is triggered by issuesLoadedMsg after issues load.
 			cmds = append(cmds, m.fetchIssues())
-		} else {
-			m.prFetches++
-			cmds = append(cmds, m.fetchPRs())
 		}
 		return m, tea.Batch(cmds...)
 	case key.Matches(msg, m.keys.Filter):
