@@ -106,7 +106,7 @@ func (c *Client) Close() {
 // FindPRForBranch call fetches fresh data.
 func (c *Client) InvalidatePRCache() {
 	c.mu.Lock()
-	c.prCache = make(map[string]*prCacheEntry)
+	clear(c.prCache)
 	c.mu.Unlock()
 }
 
@@ -324,9 +324,15 @@ func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, err
 		result = &prs[0]
 	}
 
-	// Store in cache.
+	// Store in cache and prune expired entries.
+	now := time.Now()
 	c.mu.Lock()
-	c.prCache[key] = &prCacheEntry{pr: result, fetchedAt: time.Now()}
+	c.prCache[key] = &prCacheEntry{pr: result, fetchedAt: now}
+	for k, entry := range c.prCache {
+		if now.Sub(entry.fetchedAt) >= PRCacheTTL {
+			delete(c.prCache, k)
+		}
+	}
 	c.mu.Unlock()
 
 	return result, nil

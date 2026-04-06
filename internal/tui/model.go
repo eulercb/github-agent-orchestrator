@@ -383,6 +383,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Help view
 	if m.currentView == ViewHelp {
+		if key.Matches(msg, m.keys.Quit) {
+			m.gh.Close()
+			return m, tea.Quit
+		}
 		if key.Matches(msg, m.keys.Back) || key.Matches(msg, m.keys.Help) {
 			m.currentView = ViewDashboard
 		}
