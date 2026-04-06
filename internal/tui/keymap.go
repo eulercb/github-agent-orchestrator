@@ -10,7 +10,7 @@ type KeyMap struct {
 	Quit            key.Binding
 	Tab             key.Binding
 	Spawn           key.Binding
-	Attach          key.Binding
+	Worktree        key.Binding
 	ImportWorktrees key.Binding
 	Open            key.Binding
 	OpenIssue       key.Binding
@@ -50,9 +50,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "spawn agent"),
 		),
-		Attach: key.NewBinding(
+		Worktree: key.NewBinding(
 			key.WithKeys("a"),
-			key.WithHelp("a", "attach session"),
+			key.WithHelp("a", "open worktree"),
 		),
 		ImportWorktrees: key.NewBinding(
 			key.WithKeys("w"),

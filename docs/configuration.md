@@ -42,26 +42,20 @@ spawn:
   # Default: "" (auto-detect)
   base_branch: ""
 
-# How to attach to a running session.
-attach:
-  # Strategy for opening an attached session.
-  # "auto"        — detect tmux → Warp → interactive fallback
-  # "tmux"        — always open a new tmux window
-  # "warp"        — always open a new Warp tab
-  # "command"     — run a custom command template (see attach.command)
-  # "interactive" — suspend the TUI and run inline (blocking)
-  # Default: "auto"
-  strategy: auto
-
-  # Custom command template, used when strategy is "command".
-  # Use {cmd} as a placeholder for the full attach command.
-  # Note: {cmd} may contain single quotes, so use double quotes around it.
+# How "open worktree" (a key) navigates to a session's worktree directory.
+worktree:
+  # Custom shell command to open a terminal at a path.
+  # Use {path} as a placeholder for the worktree directory.
+  # When empty, gao auto-detects:
+  #   tmux ($TMUX set)          → tmux new-window -c {path}
+  #   Warp ($TERM_PROGRAM)      → open -a Warp {path}
+  #   fallback                  → opens a login shell (suspends TUI)
   # Examples:
-  #   "gnome-terminal -- sh -c \"{cmd}; exec bash\""
-  #   "kitty sh -c \"{cmd}\""
-  #   "alacritty -e sh -c \"{cmd}\""
+  #   "kitty --directory {path}"
+  #   "alacritty --working-directory {path}"
+  #   "gnome-terminal --working-directory={path}"
   # Default: ""
-  command: ""
+  open_command: ""
 
 # Bottom status bar. Can be populated by a custom script.
 status_bar:
