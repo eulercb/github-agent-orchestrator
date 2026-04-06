@@ -278,6 +278,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			}
 			if msg.removed > 0 {
 				parts = append(parts, fmt.Sprintf("%d removed", msg.removed))
+				// Clamp cursor so it doesn't point past the end of the list.
+				lastIdx := len(m.sessions.Sessions()) - 1
+				if lastIdx < 0 {
+					lastIdx = 0
+				}
+				if m.sessionCursor > lastIdx {
+					m.sessionCursor = lastIdx
+				}
 			}
 			m.errorMsg = fmt.Sprintf("Worktrees synced: %s", strings.Join(parts, ", "))
 			return m, tea.Batch(filterCmd, m.fetchPRs())

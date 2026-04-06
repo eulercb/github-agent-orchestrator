@@ -428,7 +428,12 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 	// Resolve issues for new worktrees outside the lock (may call GitHub API).
 	var newSessions []Session
 	for _, d := range newEntries {
-		issueNumber, issueRepo, _ := m.resolveWorktreeIssue(d.repo, &d.wt)
+		issueNumber, issueRepo, resolveErr := m.resolveWorktreeIssue(d.repo, &d.wt)
+		if resolveErr != nil {
+			// Skip worktrees with corrupted/unreadable metadata rather
+			// than importing them as unassociated.
+			continue
+		}
 		name := buildSessionName(d.repo, &d.wt, issueNumber, issueRepo)
 		newSessions = append(newSessions, Session{
 			ID:           name,
