@@ -859,7 +859,7 @@ func (m *Model) resolveAttachStrategy() config.AttachStrategy {
 		}
 	}
 	if os.Getenv("TERM_PROGRAM") == "WarpTerminal" {
-		if _, err := exec.LookPath("warp-cli"); err == nil {
+		if _, err := exec.LookPath("open"); err == nil {
 			return config.AttachWarp
 		}
 	}
@@ -903,13 +903,44 @@ func (m *Model) attachViaWarp(sessID, attachCmd string) tea.Cmd {
 	dbg := m.debugLog
 	return func() tea.Msg {
 		id := dbg.Start(fmt.Sprintf("Attaching to %s via Warp", sessID))
-		cmd := exec.CommandContext(context.Background(),
-			"warp-cli", "open-tab", "--",
-			"sh", "-c", attachCmd)
+
+		// Write a temporary script for Warp to execute in a new tab.
+		f, err := os.CreateTemp("", "gao-attach-*.sh")
+		if err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("warp attach: create script: %w", err)}
+		}
+		name := f.Name()
+		if _, err := fmt.Fprintf(f, "#!/bin/sh\n%s\n", attachCmd); err != nil {
+			_ = f.Close()
+			_ = os.Remove(name)
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("warp attach: write script: %w", err)}
+		}
+		if err := f.Close(); err != nil {
+			_ = os.Remove(name)
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("warp attach: close script: %w", err)}
+		}
+		if err := os.Chmod(name, 0o700); err != nil { //nolint:gosec // script must be executable
+			_ = os.Remove(name)
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("warp attach: chmod script: %w", err)}
+		}
+
+		cmd := exec.CommandContext(context.Background(), "open", "-a", "Warp", name)
 		if err := cmd.Run(); err != nil {
+			_ = os.Remove(name)
 			dbg.Error(id, err)
 			return errMsg{err: fmt.Errorf("warp attach: %w", err)}
 		}
+
+		// Clean up after a delay so Warp has time to read the script.
+		go func() {
+			time.Sleep(5 * time.Second)
+			_ = os.Remove(name)
+		}()
+
 		dbg.Finish(id, "")
 		return nil
 	}
