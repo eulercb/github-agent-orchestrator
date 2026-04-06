@@ -66,6 +66,7 @@ type Model struct {
 	sessionCursor int
 	statusBarText string
 	errorMsg      string
+	scanning      bool
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
@@ -119,6 +120,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		prCache:           make(map[string]*github.PullRequest),
 		repos:             repos,
 		errorMsg:          initErr,
+		scanning:          true, // Init() triggers syncWorktrees
 		issueFilter:       issueFilter,
 		filterInput:       ti,
 		cfgPath:           cfgPath,
@@ -149,6 +151,10 @@ type prsLoadedMsg struct {
 }
 
 type statusRefreshMsg struct{}
+
+type titlesBackfilledMsg struct {
+	err error
+}
 
 type statusBarUpdatedMsg struct {
 	text string
@@ -220,7 +226,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		m.height = msg.Height
 		return m, filterCmd
 	case issuesLoadedMsg:
-		m.loading = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Failed to load issues: %v", msg.err)
 		} else {
@@ -239,14 +244,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
+		m.loading = false
 		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
-			// Merge successful lookups into existing cache
+			// Preserve previously known PRs when some lookups fail,
+			// and merge in the successfully refreshed entries.
+			if m.prCache == nil {
+				m.prCache = make(map[string]*github.PullRequest)
+			}
 			for k, v := range msg.prs {
 				m.prCache[k] = v
 			}
+			m.errorMsg = fmt.Sprintf("Some PR lookups failed: %v", msg.err)
 		} else {
+			// Replace the cache so stale/deleted PRs are cleared.
 			m.prCache = msg.prs
+			if m.prCache == nil {
+				m.prCache = make(map[string]*github.PullRequest)
+			}
 			m.errorMsg = ""
 		}
 		return m, filterCmd
@@ -281,6 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		}
 		return m, filterCmd
 	case worktreesSyncedMsg:
+		m.scanning = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
 			return m, filterCmd
@@ -306,9 +321,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 				}
 			}
 			m.errorMsg = fmt.Sprintf("Worktrees synced: %s", strings.Join(parts, ", "))
-			return m, tea.Batch(filterCmd, m.fetchPRs())
+		} else {
+			m.errorMsg = ""
 		}
-		m.errorMsg = ""
+		// Always refresh PRs and backfill missing issue titles after sync.
+		return m, tea.Batch(filterCmd, m.fetchPRs(), m.backfillTitles())
+	case titlesBackfilledMsg:
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("Title backfill: %v", msg.err)
+		}
 		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
@@ -383,11 +404,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
+		if m.scanning {
+			return m, nil
+		}
+		m.scanning = true
 		cmd := m.syncWorktrees()
 		return m, cmd
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd
+	case key.Matches(msg, m.keys.OpenIssue):
+		if m.activePanel == PanelSessions {
+			cmd := m.openSessionIssueBrowser()
+			return m, cmd
+		}
 	case key.Matches(msg, m.keys.Delete):
 		if m.activePanel == PanelSessions {
 			m.killSession()
@@ -396,7 +426,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		cmds := []tea.Cmd{m.refreshStatuses()}
 		if m.showIssues {
+			// issuesLoadedMsg triggers fetchPRs after issues load.
 			cmds = append(cmds, m.fetchIssues())
+		} else {
+			cmds = append(cmds, m.fetchPRs())
 		}
 		return m, tea.Batch(cmds...)
 	case key.Matches(msg, m.keys.Filter):
@@ -624,6 +657,14 @@ func (m *Model) refreshStatuses() tea.Cmd {
 	}
 }
 
+func (m *Model) backfillTitles() tea.Cmd {
+	sessMgr := m.sessions
+	return func() tea.Msg {
+		err := sessMgr.BackfillIssueTitles()
+		return titlesBackfilledMsg{err: err}
+	}
+}
+
 func (m *Model) spawnSession() tea.Cmd {
 	issue := m.selectedIssue()
 	if issue == nil {
@@ -767,6 +808,25 @@ func (m *Model) openInBrowser() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (m *Model) openSessionIssueBrowser() tea.Cmd {
+	sess := m.selectedSession()
+	if sess == nil {
+		return nil
+	}
+	if sess.IssueNumber <= 0 {
+		return nil
+	}
+	issueRepo := sess.IssueRepoName()
+	if issueRepo == "" {
+		return nil
+	}
+	number := sess.IssueNumber
+	ghClient := m.gh
+	return func() tea.Msg {
+		return openBrowserMsg{err: ghClient.OpenInBrowser(issueRepo, number)}
+	}
 }
 
 func (m *Model) killSession() {

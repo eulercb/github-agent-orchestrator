@@ -143,6 +143,7 @@ func (m *Manager) SpawnSession(r *repo.Repo, issueRepo string, issueNumber int, 
 		if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
 			IssueNumber: issueNumber,
 			IssueRepo:   issueRepo,
+			IssueTitle:  issueTitle,
 		}); writeErr != nil {
 			return nil, fmt.Errorf("persist worktree metadata: %w", writeErr)
 		}
@@ -236,6 +237,74 @@ func (m *Manager) RefreshStatuses() {
 	}
 }
 
+// BackfillIssueTitles populates empty IssueTitle fields by looking up
+// linked issues via the GitHub API. Sessions whose titles are already
+// set or that have no branch are skipped. At most maxBackfillPerRun
+// sessions are looked up per call to limit API usage.
+func (m *Manager) BackfillIssueTitles() error {
+	if m.gh == nil {
+		return nil
+	}
+
+	const maxBackfillPerRun = 10
+
+	m.mu.RLock()
+	type backfillEntry struct {
+		id     string
+		repo   string
+		branch string
+	}
+	var entries []backfillEntry
+	for i := range m.sessions {
+		s := &m.sessions[i]
+		if s.IssueTitle == "" && s.Branch != "" && s.Repo != "" {
+			entries = append(entries, backfillEntry{id: s.ID, repo: s.Repo, branch: s.Branch})
+			if len(entries) >= maxBackfillPerRun {
+				break
+			}
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	// Resolve titles outside the lock (makes network calls).
+	type resolved struct {
+		id    string
+		title string
+	}
+	var results []resolved
+	for _, e := range entries {
+		linked, err := m.gh.FindLinkedIssue(e.repo, e.branch)
+		if err != nil || linked == nil || linked.Title == "" {
+			continue
+		}
+		results = append(results, resolved{id: e.id, title: linked.Title})
+	}
+
+	if len(results) == 0 {
+		return nil
+	}
+
+	m.mu.Lock()
+	for _, r := range results {
+		for i := range m.sessions {
+			if m.sessions[i].ID == r.id && m.sessions[i].IssueTitle == "" {
+				m.sessions[i].IssueTitle = r.title
+				break
+			}
+		}
+	}
+	m.mu.Unlock()
+
+	if err := m.saveState(); err != nil {
+		return fmt.Errorf("persist backfilled titles: %w", err)
+	}
+	return nil
+}
+
 // RemoveSession removes a session from tracking and optionally kills the process.
 func (m *Manager) RemoveSession(id string, killProcess bool) error {
 	m.mu.Lock()
@@ -288,6 +357,7 @@ type Worktree struct {
 type worktreeMetadata struct {
 	IssueNumber int    `yaml:"issue_number"`
 	IssueRepo   string `yaml:"issue_repo,omitempty"`
+	IssueTitle  string `yaml:"issue_title,omitempty"`
 }
 
 // metadataFile is the relative path to the gao metadata file inside a worktree.
@@ -412,7 +482,7 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 	// Resolve issues for new worktrees outside the lock (may call GitHub API).
 	var newSessions []Session
 	for _, d := range newEntries {
-		issueNumber, issueRepo, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
+		issueNumber, issueRepo, issueTitle, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
 		if resolveErr != nil {
 			continue
 		}
@@ -420,6 +490,7 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		newSessions = append(newSessions, Session{
 			ID:           name,
 			IssueNumber:  issueNumber,
+			IssueTitle:   issueTitle,
 			Repo:         d.r.FullName(),
 			IssueRepo:    issueRepo,
 			Branch:       d.wt.Branch,
@@ -515,14 +586,23 @@ func parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
-// resolveWorktreeIssue determines the issue number and repo for a worktree.
-func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber int, issueRepo string, err error) {
+// resolveWorktreeIssue determines the issue number, repo, and title for a worktree.
+func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber int, issueRepo, issueTitle string, err error) {
 	meta, metaErr := readWorktreeMetadata(wt.Path)
 	if metaErr != nil {
-		return 0, "", metaErr
+		return 0, "", "", metaErr
 	}
 	if meta != nil && meta.IssueNumber > 0 {
-		return meta.IssueNumber, meta.IssueRepo, nil
+		// Backfill IssueTitle from GitHub when metadata was written by an
+		// older version that didn't persist the title.
+		if meta.IssueTitle == "" && m.gh != nil && wt.Branch != "" {
+			linked, ghErr := m.gh.FindLinkedIssue(r.FullName(), wt.Branch)
+			if ghErr == nil && linked != nil && linked.Title != "" {
+				meta.IssueTitle = linked.Title
+				_ = writeWorktreeMetadata(wt.Path, meta)
+			}
+		}
+		return meta.IssueNumber, meta.IssueRepo, meta.IssueTitle, nil
 	}
 
 	if m.gh != nil && wt.Branch != "" {
@@ -532,12 +612,13 @@ func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber 
 			_ = writeWorktreeMetadata(wt.Path, &worktreeMetadata{
 				IssueNumber: linked.Number,
 				IssueRepo:   issueRepo,
+				IssueTitle:  linked.Title,
 			})
-			return linked.Number, issueRepo, nil
+			return linked.Number, issueRepo, linked.Title, nil
 		}
 	}
 
-	return 0, "", nil
+	return 0, "", "", nil
 }
 
 // buildSessionName generates a human-readable session ID.

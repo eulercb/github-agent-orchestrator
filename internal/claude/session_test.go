@@ -178,7 +178,7 @@ func TestWorktreeMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("write and read", func(t *testing.T) {
-		meta := &worktreeMetadata{IssueNumber: 42, IssueRepo: "acme/app"}
+		meta := &worktreeMetadata{IssueNumber: 42, IssueRepo: "acme/app", IssueTitle: "Fix login bug"}
 		require.NoError(t, writeWorktreeMetadata(tmpDir, meta))
 
 		got, err := readWorktreeMetadata(tmpDir)
@@ -186,6 +186,7 @@ func TestWorktreeMetadata(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Equal(t, 42, got.IssueNumber)
 		assert.Equal(t, "acme/app", got.IssueRepo)
+		assert.Equal(t, "Fix login bug", got.IssueTitle)
 	})
 
 	t.Run("read missing file", func(t *testing.T) {
@@ -214,6 +215,44 @@ func TestWorktreeMetadata(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Equal(t, 5, got.IssueNumber)
 		assert.Empty(t, got.IssueRepo)
+	})
+}
+
+func TestBackfillIssueTitles(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "sessions.yaml")
+
+	mgr := &Manager{
+		cfg:       &config.Config{},
+		stateFile: stateFile,
+		sessions: []Session{
+			{ID: "s1", Repo: "acme/app", Branch: "claude/issue-1", IssueTitle: ""},
+			{ID: "s2", Repo: "acme/app", Branch: "claude/issue-2", IssueTitle: "Already set"},
+			{ID: "s3", Repo: "acme/app", Branch: "", IssueTitle: ""},
+		},
+	}
+
+	t.Run("no-op when gh is nil", func(t *testing.T) {
+		mgr.gh = nil
+		require.NoError(t, mgr.BackfillIssueTitles())
+
+		// Titles unchanged — no client to fetch from.
+		assert.Empty(t, mgr.sessions[0].IssueTitle)
+		assert.Equal(t, "Already set", mgr.sessions[1].IssueTitle)
+		assert.Empty(t, mgr.sessions[2].IssueTitle)
+	})
+
+	t.Run("preserves existing titles when gh is nil", func(t *testing.T) {
+		mgr.gh = nil
+		require.NoError(t, mgr.BackfillIssueTitles())
+		assert.Equal(t, "Already set", mgr.sessions[1].IssueTitle)
+	})
+
+	t.Run("skips sessions without branch", func(t *testing.T) {
+		// s3 has no branch — should be skipped even if gh were available.
+		mgr.gh = nil
+		require.NoError(t, mgr.BackfillIssueTitles())
+		assert.Empty(t, mgr.sessions[2].IssueTitle)
 	})
 }
 

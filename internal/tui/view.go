@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
@@ -232,6 +233,11 @@ func (m *Model) renderSessionsPanel(maxHeight int) string {
 	}
 
 	header := titleStyle.Render("Sessions")
+	if m.scanning {
+		header += styles.MutedText.Render(" (scanning worktrees...)")
+	} else if m.loading {
+		header += styles.MutedText.Render(" (refreshing...)")
+	}
 	var lines []string
 	lines = append(lines, header)
 
@@ -299,11 +305,6 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	}
 
 	issueRef := fmt.Sprintf("#%-5d", sess.IssueNumber)
-	branchShort := sess.Branch
-	branchRunes := []rune(branchShort)
-	if len(branchRunes) > 25 {
-		branchShort = string(branchRunes[:22]) + "..."
-	}
 
 	statusStr := statusStyle.Render(fmt.Sprintf("%s %s", statusIcon, statusText))
 
@@ -313,7 +314,23 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 		prStr = m.renderPRStatus(pr)
 	}
 
-	content := fmt.Sprintf("  %s %-25s %s  %s", issueRef, branchShort, statusStr, prStr)
+	// Issue title or branch fallback — use remaining terminal width.
+	issueTitle := sess.IssueTitle
+	if issueTitle == "" {
+		issueTitle = sess.Branch
+	}
+	// Calculate space used by fixed columns:
+	// "  " + issueRef + " " + status + "  " + prStr + "  "
+	fixedWidth := 2 + lipgloss.Width(issueRef) + 1 + lipgloss.Width(statusStr) + 2 + lipgloss.Width(prStr) + 2
+	maxTitle := m.width - fixedWidth
+	if maxTitle < 10 {
+		maxTitle = 10
+	}
+	if lipgloss.Width(issueTitle) > maxTitle {
+		issueTitle = ansi.Truncate(issueTitle, maxTitle-3, "...")
+	}
+
+	content := fmt.Sprintf("  %s %s  %s  %s", issueRef, statusStr, prStr, issueTitle)
 
 	// Add last activity
 	if sess.LastActivity != "" && !selected {
@@ -371,7 +388,7 @@ func (m *Model) renderHelpBar() string {
 	case PanelIssues:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "i hide issues", "r refresh", "? help", "q quit"}
 	case PanelSessions:
-		items = []string{"↑↓ navigate", "a attach", "w scan", "o open PR", "x kill"}
+		items = []string{"↑↓ navigate", "a attach", "w scan", "o open PR", "O open issue", "x kill"}
 		if m.showIssues {
 			items = append(items, "tab switch", "i hide issues")
 		} else {
@@ -401,7 +418,8 @@ func (m *Model) viewHelp() string {
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
     w            Scan worktrees (discover new, remove stale)
-    o            Open issue/PR in browser
+    o            Open selected issue (Issues) or session PR (Sessions) in browser
+    O            Open session's issue in browser (Sessions panel)
     x            Kill selected session
     i            Toggle issues panel visibility
     r            Refresh issues and session statuses

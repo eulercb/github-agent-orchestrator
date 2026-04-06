@@ -271,6 +271,7 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 // closing references (e.g. "Closes #42" in the PR body).
 type LinkedIssue struct {
 	Number     int    `json:"number"`
+	Title      string `json:"title"`
 	Repository string `json:"repository"` // "owner/name"
 }
 
@@ -290,6 +291,7 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
         closingIssuesReferences(first: 1) {
           nodes {
             number
+            title
             repository { nameWithOwner }
           }
         }
@@ -310,7 +312,8 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
 					Nodes []struct {
 						ClosingIssuesReferences struct {
 							Nodes []struct {
-								Number     int `json:"number"`
+								Number     int    `json:"number"`
+								Title      string `json:"title"`
 								Repository struct {
 									NameWithOwner string `json:"nameWithOwner"`
 								} `json:"repository"`
@@ -351,6 +354,7 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
 
 	return &LinkedIssue{
 		Number:     issues[0].Number,
+		Title:      issues[0].Title,
 		Repository: issues[0].Repository.NameWithOwner,
 	}, nil
 }
@@ -367,10 +371,23 @@ func runGH(args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	out, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("gh %s: %s: %w", strings.Join(args, " "), string(exitErr.Stderr), err)
+		// Include up to the first 3 args for context (e.g. "pr list --repo")
+		// but avoid dumping full GraphQL queries or long flag values.
+		cmdHint := args[0]
+		if len(args) > 1 {
+			limit := 3
+			if len(args) < limit {
+				limit = len(args)
+			}
+			cmdHint = strings.Join(args[:limit], " ")
 		}
-		return nil, err
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if stderr != "" {
+				return nil, fmt.Errorf("gh %s: %s: %w", cmdHint, stderr, err)
+			}
+		}
+		return nil, fmt.Errorf("gh %s: %w", cmdHint, err)
 	}
 	return out, nil
 }
