@@ -12,6 +12,9 @@ gao is configured via a YAML file at `~/.config/gao/config.yaml`. Run `gao init`
 repos:
   - owner: eulercb
     name: my-project
+    # Override the local clone path for this specific repo.
+    # If unset, falls back to repos_dir/<name>, then ~/<name>.
+    local_path: "/home/you/work/my-project"
     filters:
       assignee: "@me"          # GitHub username or "@me"
       labels:                  # Only show issues with ALL of these labels
@@ -25,6 +28,11 @@ repos:
       assignee: "@me"
       state: open
 
+# Root directory where repos are cloned. Used as <repos_dir>/<name>
+# when a repo doesn't have an explicit local_path.
+# Default: "" (falls back to ~/<name>)
+repos_dir: ""
+
 # How Claude Code sessions are spawned.
 spawn:
   # Shell command to run in the worktree directory.
@@ -36,11 +44,6 @@ spawn:
   # Worktrees let multiple sessions work on the same repo simultaneously.
   # Default: true
   use_worktree: true
-
-  # Path to the local clone of the repo. Used as the base for worktrees.
-  # If empty, defaults to ~/repo-name.
-  # Default: ""
-  repo_dir: ""
 
   # Base branch for creating worktrees (e.g., "main", "master", "develop").
   # If empty, gao derives it from origin/HEAD automatically.

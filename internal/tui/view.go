@@ -506,11 +506,11 @@ func (m *Model) renderHelpBar() string {
 	var items []string
 	switch m.activePanel {
 	case PanelIssues:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "o open", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "r refresh", "? help", "q quit"}
 	case PanelSessions:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "a attach", "o open PR", "x kill", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "a attach", "w scan", "o open PR", "x kill", "r refresh", "? help", "q quit"}
 	case PanelPRs:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "w scan", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
@@ -530,9 +530,10 @@ func (m *Model) viewHelp() string {
     Esc          Go back
 
   Actions:
-    /            Edit issue filter (GitHub search syntax)
+    /            Edit issue/PR filter in Issues or PRs panels (GitHub search syntax)
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
+    w            Scan worktrees (discover new, remove stale)
     o            Open issue/PR in browser
     x            Kill selected session
     c            Clear session for selected PR (in PRs panel)

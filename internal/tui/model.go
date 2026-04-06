@@ -138,6 +138,12 @@ type sessionKilledMsg struct {
 	err error
 }
 
+type worktreesSyncedMsg struct {
+	added   int
+	removed int
+	err     error
+}
+
 type openBrowserMsg struct {
 	err error
 }
@@ -154,6 +160,7 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 		m.fetchIssues(),
 		m.fetchPRList(),
 		m.refreshStatuses(),
+		m.syncWorktrees(),
 		m.tickCmd(),
 	)
 }
@@ -259,6 +266,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			}
 		}
 		return m, filterCmd
+	case worktreesSyncedMsg:
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
+			return m, filterCmd
+		}
+		if msg.added > 0 || msg.removed > 0 {
+			var parts []string
+			if msg.added > 0 {
+				parts = append(parts, fmt.Sprintf("%d added", msg.added))
+			}
+			if msg.removed > 0 {
+				parts = append(parts, fmt.Sprintf("%d removed", msg.removed))
+				// Clamp cursor so it doesn't point past the end of the list.
+				lastIdx := len(m.sessions.Sessions()) - 1
+				if lastIdx < 0 {
+					lastIdx = 0
+				}
+				if m.sessionCursor > lastIdx {
+					m.sessionCursor = lastIdx
+				}
+			}
+			m.errorMsg = fmt.Sprintf("Worktrees synced: %s", strings.Join(parts, ", "))
+			return m, tea.Batch(filterCmd, m.fetchPRs())
+		}
+		m.errorMsg = ""
+		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
@@ -334,6 +367,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.attachSession()
 			return m, cmd
 		}
+	case key.Matches(msg, m.keys.ImportWorktrees):
+		cmd := m.syncWorktrees()
+		return m, cmd
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd
@@ -666,6 +702,17 @@ func (m *Model) resolveAttachCommand(workDir string) string {
 		spawnCmd = "claude --dangerously-skip-permissions"
 	}
 	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
+}
+
+func (m *Model) syncWorktrees() tea.Cmd {
+	sessMgr := m.sessions
+	return func() tea.Msg {
+		result, err := sessMgr.SyncWorktrees()
+		if err != nil {
+			return worktreesSyncedMsg{err: err}
+		}
+		return worktreesSyncedMsg{added: result.Added, removed: result.Removed}
+	}
 }
 
 func (m *Model) openInBrowser() tea.Cmd {

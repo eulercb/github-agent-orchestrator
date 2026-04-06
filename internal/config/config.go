@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +13,7 @@ import (
 // Config is the top-level configuration for gao.
 type Config struct {
 	Repos      []RepoConfig  `yaml:"repos"`
+	ReposDir   string        `yaml:"repos_dir"`
 	Spawn      SpawnConfig   `yaml:"spawn"`
 	StatusBar  StatusBar     `yaml:"status_bar"`
 	Attach     AttachConfig  `yaml:"attach"`
@@ -23,6 +25,7 @@ type Config struct {
 type RepoConfig struct {
 	Owner       string       `yaml:"owner"`
 	Name        string       `yaml:"name"`
+	LocalPath   string       `yaml:"local_path,omitempty"`
 	IssueSource *IssueSource `yaml:"issue_source,omitempty"`
 	Filters     IssueFilters `yaml:"filters"`
 }
@@ -60,6 +63,46 @@ func (r *RepoConfig) IssueRepoFullName() string {
 	return owner + "/" + name
 }
 
+// expandTilde replaces a leading "~/" or bare "~" in a path with the user's
+// home directory. Go's filepath functions do not perform shell-style tilde
+// expansion, so this must be done explicitly.
+func expandTilde(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("determine user home directory: %w", err)
+		}
+		return filepath.Join(home, path[1:]), nil
+	}
+	return path, nil
+}
+
+// RepoLocalDir resolves the local filesystem path for a repository.
+// Resolution order:
+//  1. repo.LocalPath (per-repo override)
+//  2. config.ReposDir/<repo.Name> (global repos root)
+//  3. ~/<repo.Name> (fallback)
+//
+// Leading "~/" in LocalPath and ReposDir is expanded to the user's home
+// directory.
+func (c *Config) RepoLocalDir(repo *RepoConfig) (string, error) {
+	if repo.LocalPath != "" {
+		return expandTilde(repo.LocalPath)
+	}
+	if c.ReposDir != "" {
+		expanded, err := expandTilde(c.ReposDir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(expanded, repo.Name), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("determine user home directory: %w", err)
+	}
+	return filepath.Join(home, repo.Name), nil
+}
+
 // DefaultSearch is the fallback issue filter used when no search query
 // is configured. It shows open issues assigned to the current user.
 const DefaultSearch = "is:open assignee:@me"
@@ -76,7 +119,6 @@ type IssueFilters struct {
 type SpawnConfig struct {
 	Command     string `yaml:"command"`
 	UseWorktree bool   `yaml:"use_worktree"`
-	RepoDir     string `yaml:"repo_dir"`
 	BaseBranch  string `yaml:"base_branch"`
 }
 

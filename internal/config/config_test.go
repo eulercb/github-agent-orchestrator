@@ -84,6 +84,62 @@ func TestIssueRepoFullName(t *testing.T) {
 	assert.Equal(t, "other-org/bar", r.IssueRepoFullName())
 }
 
+func TestRepoLocalDir(t *testing.T) {
+	repo := &RepoConfig{Owner: "acme", Name: "app"}
+
+	t.Run("local_path wins", func(t *testing.T) {
+		cfg := Config{ReposDir: "/repos"}
+		repo := &RepoConfig{Owner: "acme", Name: "app", LocalPath: "/custom/app"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		assert.Equal(t, "/custom/app", dir)
+	})
+
+	t.Run("repos_dir fallback", func(t *testing.T) {
+		cfg := Config{ReposDir: "/repos"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		assert.Equal(t, "/repos/app", dir)
+	})
+
+	t.Run("home fallback", func(t *testing.T) {
+		cfg := Config{}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "app"), dir)
+	})
+
+	t.Run("tilde in repos_dir", func(t *testing.T) {
+		cfg := Config{ReposDir: "~/repos"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "repos", "app"), dir)
+	})
+
+	t.Run("tilde in local_path", func(t *testing.T) {
+		cfg := Config{}
+		repo := &RepoConfig{Owner: "acme", Name: "app", LocalPath: "~/custom/app"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "custom", "app"), dir)
+	})
+
+	t.Run("bare tilde in repos_dir", func(t *testing.T) {
+		cfg := Config{ReposDir: "~"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "app"), dir)
+	})
+}
+
 func TestSaveAndLoadWithIssueSource(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
