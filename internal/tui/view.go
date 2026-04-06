@@ -300,8 +300,11 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 
 	issueRef := fmt.Sprintf("#%-5d", sess.IssueNumber)
 
-	// Issue title (truncated)
+	// Issue title or branch fallback (truncated)
 	issueTitle := sess.IssueTitle
+	if issueTitle == "" {
+		issueTitle = sess.Branch
+	}
 	issueTitleRunes := []rune(issueTitle)
 	if len(issueTitleRunes) > 30 {
 		issueTitle = string(issueTitleRunes[:27]) + "..."
@@ -403,7 +406,7 @@ func (m *Model) viewHelp() string {
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
     w            Scan worktrees (discover new, remove stale)
-    o            Open issue/PR in browser
+    o            Open selected issue (Issues) or session PR (Sessions) in browser
     O            Open session's issue in browser (Sessions panel)
     x            Kill selected session
     i            Toggle issues panel visibility
