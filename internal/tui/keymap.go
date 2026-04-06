@@ -19,6 +19,7 @@ type KeyMap struct {
 	Help            key.Binding
 	Filter          key.Binding
 	ToggleIssues    key.Binding
+	ToggleDebug     key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -84,6 +85,10 @@ func DefaultKeyMap() KeyMap {
 		ToggleIssues: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", "toggle issues"),
+		),
+		ToggleDebug: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "toggle debug"),
 		),
 	}
 }

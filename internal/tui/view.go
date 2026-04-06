@@ -3,12 +3,14 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
+	"github.com/eulercb/github-agent-orchestrator/internal/debug"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui/styles"
 )
@@ -50,6 +52,16 @@ func (m *Model) viewDashboard() string {
 		contentHeight--
 	}
 
+	// Reserve space for debug pane when visible.
+	debugHeight := 0
+	if m.showDebug {
+		debugHeight = contentHeight / 3
+		if debugHeight < 5 {
+			debugHeight = 5
+		}
+		contentHeight -= debugHeight + 1 // +1 for separator
+	}
+
 	if m.showIssues {
 		issueHeight := contentHeight / 2
 		sessionHeight := contentHeight - issueHeight
@@ -65,6 +77,14 @@ func (m *Model) viewDashboard() string {
 		// Sessions only — full height
 		sessionsContent := m.renderSessionsPanel(contentHeight)
 		sections = append(sections, sessionsContent)
+	}
+
+	// Debug pane
+	if m.showDebug {
+		separator := styles.DebugBorder.Render(strings.Repeat("─", m.width))
+		sections = append(sections, separator)
+		debugContent := m.renderDebugPane(debugHeight)
+		sections = append(sections, debugContent)
 	}
 
 	// Status bar
@@ -382,11 +402,98 @@ func (m *Model) renderStatusBar() string {
 	return styles.StatusBar.Width(m.width).Render(text)
 }
 
+func (m *Model) renderDebugPane(maxHeight int) string {
+	header := styles.DebugTitle.Render("Debug Log")
+
+	events := m.debugLog.Events()
+
+	var lines []string
+	lines = append(lines, header)
+
+	if len(events) == 0 {
+		lines = append(lines, styles.MutedText.Render("  No events recorded yet"))
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	}
+
+	// Show the tail of events that fit in the available height.
+	visibleCount := maxHeight - 1 // minus header
+	if visibleCount < 1 {
+		visibleCount = 1
+	}
+	start := 0
+	if len(events) > visibleCount {
+		start = len(events) - visibleCount
+	}
+
+	for i := start; i < len(events); i++ {
+		line := m.renderDebugEvent(&events[i])
+		lines = append(lines, line)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func (m *Model) renderDebugEvent(evt *debug.Event) string {
+	ts := styles.DebugTimestamp.Render(evt.StartedAt.Format("15:04:05.000"))
+
+	var icon, msg string
+	switch evt.Status {
+	case debug.StatusRunning:
+		icon = styles.DebugRunning.Render("⟳")
+		msg = styles.DebugRunning.Render(evt.Message)
+	case debug.StatusDone:
+		icon = styles.DebugDone.Render("✓")
+		msg = styles.DebugDone.Render(evt.Message)
+	case debug.StatusError:
+		icon = styles.DebugError.Render("✗")
+		msg = styles.DebugError.Render(evt.Message)
+	default: // StatusInfo
+		icon = styles.DebugInfo.Render("·")
+		msg = styles.DebugInfo.Render(evt.Message)
+	}
+
+	dur := formatDuration(evt.Duration())
+	durStr := ""
+	if evt.Status == debug.StatusRunning {
+		durStr = styles.DebugDuration.Render(" (" + dur + "...)")
+	} else if evt.Status != debug.StatusInfo {
+		durStr = styles.DebugDuration.Render(" (" + dur + ")")
+	}
+
+	detail := ""
+	if evt.Detail != "" {
+		maxDetail := m.width - 40
+		if maxDetail < 10 {
+			maxDetail = 10
+		}
+		detailRunes := []rune(evt.Detail)
+		detailText := evt.Detail
+		if len(detailRunes) > maxDetail {
+			detailText = string(detailRunes[:maxDetail]) + "..."
+		}
+		detail = " " + styles.DebugDetail.Render(detailText)
+	}
+
+	return fmt.Sprintf("  %s %s %s%s%s", ts, icon, msg, durStr, detail)
+}
+
+// formatDuration returns a human-readable compact duration string.
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	case d < time.Minute:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	default:
+		return fmt.Sprintf("%.0fm%.0fs", d.Minutes(), d.Seconds()-d.Minutes()*60)
+	}
+}
+
 func (m *Model) renderHelpBar() string {
 	var items []string
 	switch m.activePanel {
 	case PanelIssues:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "i hide issues", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "i hide issues", "d debug", "r refresh", "? help", "q quit"}
 	case PanelSessions:
 		items = []string{"↑↓ navigate", "a attach", "w scan", "o open PR", "O open issue", "x kill"}
 		if m.showIssues {
@@ -394,7 +501,7 @@ func (m *Model) renderHelpBar() string {
 		} else {
 			items = append(items, "i show issues")
 		}
-		items = append(items, "r refresh", "? help", "q quit")
+		items = append(items, "d debug", "r refresh", "? help", "q quit")
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }
@@ -422,6 +529,7 @@ func (m *Model) viewHelp() string {
     O            Open session's issue in browser (Sessions panel)
     x            Kill selected session
     i            Toggle issues panel visibility
+    d            Toggle debug log pane
     r            Refresh issues and session statuses
 
   Other:

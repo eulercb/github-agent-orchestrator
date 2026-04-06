@@ -14,6 +14,7 @@ import (
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
+	"github.com/eulercb/github-agent-orchestrator/internal/debug"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/repo"
 	"github.com/eulercb/github-agent-orchestrator/internal/statusbar"
@@ -77,6 +78,10 @@ type Model struct {
 	showIssues        bool
 	issuesInitialized bool
 	filterForToggle   bool // true when filter editor was opened by toggle
+
+	// Debug pane
+	debugLog  *debug.Log
+	showDebug bool
 }
 
 // NewModel creates the initial TUI model.
@@ -110,6 +115,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 	}
 
 	showIssues := cfg.TrackIssues
+	dbgLog := debug.NewLog()
 
 	return Model{
 		cfg:               cfg,
@@ -127,6 +133,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		showIssues:        showIssues,
 		issuesInitialized: showIssues,
 		activePanel:       panelForStart(showIssues),
+		debugLog:          dbgLog,
 	}
 }
 
@@ -189,6 +196,7 @@ type errMsg struct {
 
 // Init starts the application.
 func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface requires value receiver
+	m.debugLog.Infof("gao started — repos_dir: %s, %d repos discovered", m.cfg.ReposDir, len(m.repos))
 	cmds := []tea.Cmd{
 		m.refreshStatuses(),
 		m.syncWorktrees(),
@@ -232,6 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.issues = msg.issues
 			m.errorMsg = ""
 			m.issuesInitialized = true
+			m.debugLog.Infof("Issues loaded: %d results", len(msg.issues))
 			// Clamp cursor to new list bounds
 			lastIdx := len(m.issues) - 1
 			if lastIdx < 0 {
@@ -277,12 +286,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		} else {
 			m.errorMsg = ""
 			m.activePanel = PanelSessions
+			m.debugLog.Infof("Session spawned: %s", msg.session.ID)
 		}
 		return m, filterCmd
 	case sessionKilledMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Kill failed: %v", msg.err)
 		} else {
+			m.debugLog.Infof("Session killed: %s", msg.id)
 			// Clamp cursor after removal
 			sessions := m.sessions.Sessions()
 			lastIdx := len(sessions) - 1
@@ -298,6 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		m.scanning = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
+			m.debugLog.Infof("Worktree sync failed: %v", msg.err)
 			return m, filterCmd
 		}
 		// Update discovered repos
@@ -337,6 +349,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		}
 		return m, filterCmd
 	case tickMsg:
+		m.debugLog.Info("Tick: refreshing statuses and PRs")
 		m.sessions.RefreshStatuses()
 		cmd := m.fetchPRs()
 		cmds := []tea.Cmd{filterCmd, m.tickCmd(), cmd, m.refreshStatusBar()}
@@ -424,6 +437,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
+		m.debugLog.Info("Manual refresh triggered")
 		cmds := []tea.Cmd{m.refreshStatuses()}
 		if m.showIssues {
 			// issuesLoadedMsg triggers fetchPRs after issues load.
@@ -449,6 +463,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.filterInput.Cursor.BlinkCmd()
 	case key.Matches(msg, m.keys.ToggleIssues):
 		return m.toggleIssues()
+	case key.Matches(msg, m.keys.ToggleDebug):
+		m.showDebug = !m.showDebug
 	}
 	return m, nil
 }
@@ -523,6 +539,7 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.issueFilter = query
 			m.issuesCursor = 0
+			m.debugLog.Infof("Issue filter changed: %s", query)
 			cmd := m.fetchIssues()
 			return m, cmd
 		case tea.KeyEsc:
@@ -622,16 +639,31 @@ func (m *Model) findRepoForIssue(issueRepo string) *repo.Repo {
 
 func (m *Model) fetchIssues() tea.Cmd {
 	search := m.issueFilter
+	dbg := m.debugLog
 	return func() tea.Msg {
+		id := dbg.Start("Fetching issues: " + search)
 		issues, err := m.gh.ListIssues(search)
+		if err != nil {
+			dbg.Error(id, err)
+		} else {
+			dbg.Finish(id, fmt.Sprintf("%d issues loaded", len(issues)))
+		}
 		return issuesLoadedMsg{issues: issues, err: err}
 	}
 }
 
 func (m *Model) fetchPRs() tea.Cmd {
+	dbg := m.debugLog
 	return func() tea.Msg {
-		prs := make(map[string]*github.PullRequest)
 		sessions := m.sessions.Sessions()
+		count := 0
+		for i := range sessions {
+			if sessions[i].Branch != "" {
+				count++
+			}
+		}
+		id := dbg.Start(fmt.Sprintf("Fetching PRs for %d sessions", count))
+		prs := make(map[string]*github.PullRequest)
 		var firstErr error
 		for i := range sessions {
 			s := &sessions[i]
@@ -647,20 +679,40 @@ func (m *Model) fetchPRs() tea.Cmd {
 			}
 			prs[prCacheKey(s.Repo, s.Branch)] = pr
 		}
+		found := 0
+		for _, pr := range prs {
+			if pr != nil {
+				found++
+			}
+		}
+		if firstErr != nil {
+			dbg.Error(id, firstErr)
+		} else {
+			dbg.Finish(id, fmt.Sprintf("%d PRs found", found))
+		}
 		return prsLoadedMsg{prs: prs, err: firstErr}
 	}
 }
 
 func (m *Model) refreshStatuses() tea.Cmd {
+	dbg := m.debugLog
 	return func() tea.Msg {
+		dbg.Info("Refreshing session statuses")
 		return statusRefreshMsg{}
 	}
 }
 
 func (m *Model) backfillTitles() tea.Cmd {
 	sessMgr := m.sessions
+	dbg := m.debugLog
 	return func() tea.Msg {
+		id := dbg.Start("Backfilling issue titles")
 		err := sessMgr.BackfillIssueTitles()
+		if err != nil {
+			dbg.Error(id, err)
+		} else {
+			dbg.Finish(id, "")
+		}
 		return titlesBackfilledMsg{err: err}
 	}
 }
@@ -699,9 +751,16 @@ func (m *Model) spawnSession() tea.Cmd {
 	issueNum := issue.Number
 	issueTitle := issue.Title
 	repoCopy := *r
+	dbg := m.debugLog
 
 	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Spawning session for #%d: %s", issueNum, issueTitle))
 		sess, err := m.sessions.SpawnSession(&repoCopy, issueRepo, issueNum, issueTitle)
+		if err != nil {
+			dbg.Error(id, err)
+		} else {
+			dbg.Finish(id, fmt.Sprintf("session %s (PID %d)", sess.ID, sess.PID))
+		}
 		return sessionSpawnedMsg{session: sess, err: err}
 	}
 }
@@ -728,27 +787,36 @@ func (m *Model) attachSession() tea.Cmd {
 		useWarp = err == nil
 	}
 
+	dbg := m.debugLog
+	sessID := sess.ID
+
 	if useWarp {
 		return func() tea.Msg {
+			id := dbg.Start(fmt.Sprintf("Attaching to %s via Warp", sessID))
 			cmd := exec.CommandContext(context.Background(),
 				"warp-cli", "open-tab", "--",
 				"sh", "-c", "cd "+shellQuoteSession(workDir)+" && "+spawnCmd)
 			if err := cmd.Run(); err != nil {
+				dbg.Error(id, err)
 				return errMsg{err: fmt.Errorf("warp attach: %w", err)}
 			}
+			dbg.Finish(id, "")
 			return nil
 		}
 	}
 
 	// Launch the spawn command interactively in the session's worktree
 	attachCmd := m.resolveAttachCommand(workDir)
+	dbg.Info(fmt.Sprintf("Attaching to %s interactively", sessID))
 
 	return tea.ExecProcess(
 		exec.CommandContext(context.Background(), "sh", "-c", attachCmd),
 		func(err error) tea.Msg {
 			if err != nil {
+				dbg.Infof("Attach to %s failed: %v", sessID, err)
 				return errMsg{err: fmt.Errorf("attach: %w", err)}
 			}
+			dbg.Infof("Detached from %s", sessID)
 			return statusRefreshMsg{}
 		},
 	)
@@ -765,11 +833,15 @@ func (m *Model) resolveAttachCommand(workDir string) string {
 
 func (m *Model) syncWorktrees() tea.Cmd {
 	sessMgr := m.sessions
+	dbg := m.debugLog
 	return func() tea.Msg {
+		id := dbg.Start("Scanning worktrees")
 		result, err := sessMgr.SyncWorktrees()
 		if err != nil {
+			dbg.Error(id, err)
 			return worktreesSyncedMsg{err: err}
 		}
+		dbg.Finish(id, fmt.Sprintf("%d added, %d removed", result.Added, result.Removed))
 		// Re-discover repos after sync so the list stays current.
 		repos, _ := sessMgr.DiscoverRepos()
 		return worktreesSyncedMsg{added: result.Added, removed: result.Removed, repos: repos}
@@ -777,6 +849,7 @@ func (m *Model) syncWorktrees() tea.Cmd {
 }
 
 func (m *Model) openInBrowser() tea.Cmd {
+	dbg := m.debugLog
 	switch m.activePanel {
 	case PanelIssues:
 		issue := m.selectedIssue()
@@ -790,6 +863,7 @@ func (m *Model) openInBrowser() tea.Cmd {
 		number := issue.Number
 		ghClient := m.gh
 		return func() tea.Msg {
+			dbg.Infof("Opening issue #%d in browser", number)
 			return openBrowserMsg{err: ghClient.OpenInBrowser(issueRepo, number)}
 		}
 	case PanelSessions:
@@ -803,6 +877,7 @@ func (m *Model) openInBrowser() tea.Cmd {
 			number := pr.Number
 			ghClient := m.gh
 			return func() tea.Msg {
+				dbg.Infof("Opening PR #%d in browser", number)
 				return openBrowserMsg{err: ghClient.OpenInBrowser(repoName, number)}
 			}
 		}
@@ -824,7 +899,9 @@ func (m *Model) openSessionIssueBrowser() tea.Cmd {
 	}
 	number := sess.IssueNumber
 	ghClient := m.gh
+	dbg := m.debugLog
 	return func() tea.Msg {
+		dbg.Infof("Opening issue #%d in browser", number)
 		return openBrowserMsg{err: ghClient.OpenInBrowser(issueRepo, number)}
 	}
 }
@@ -836,10 +913,17 @@ func (m *Model) killSession() {
 	}
 
 	sessID := sess.ID
+	dbg := m.debugLog
 	m.confirmMsg = fmt.Sprintf("Kill session %q? (y/n)", sess.ID)
 	m.currentView = ViewConfirm
 	m.confirmAction = func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Killing session %s", sessID))
 		err := m.sessions.RemoveSession(sessID, true)
+		if err != nil {
+			dbg.Error(id, err)
+		} else {
+			dbg.Finish(id, "removed")
+		}
 		return sessionKilledMsg{id: sessID, err: err}
 	}
 }

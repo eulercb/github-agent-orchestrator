@@ -16,6 +16,8 @@ var (
 	Danger = lipgloss.Color("#EF4444")
 	// Muted color for less prominent text.
 	Muted = lipgloss.Color("#6B7280")
+	// DebugAccent color for the debug pane header.
+	DebugAccent = lipgloss.Color("#A78BFA")
 	// Text is the default foreground color.
 	Text = lipgloss.Color("#E5E7EB")
 	// BgDark is used for status bar backgrounds.
@@ -83,4 +85,35 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(Muted).
 			Padding(0, 1)
+
+	// DebugTitle styles the debug pane header.
+	DebugTitle = lipgloss.NewStyle().
+			Foreground(DebugAccent).
+			Bold(true).
+			Padding(0, 1)
+
+	// DebugTimestamp styles the timestamp column in the debug pane.
+	DebugTimestamp = lipgloss.NewStyle().Foreground(Muted)
+
+	// DebugRunning styles running operation entries.
+	DebugRunning = lipgloss.NewStyle().Foreground(Warning)
+
+	// DebugDone styles completed operation entries.
+	DebugDone = lipgloss.NewStyle().Foreground(Success)
+
+	// DebugError styles failed operation entries.
+	DebugError = lipgloss.NewStyle().Foreground(Danger)
+
+	// DebugInfo styles informational entries.
+	DebugInfo = lipgloss.NewStyle().Foreground(Text)
+
+	// DebugDetail styles the detail/error text for completed events.
+	DebugDetail = lipgloss.NewStyle().Foreground(Muted).Italic(true)
+
+	// DebugDuration styles the duration text.
+	DebugDuration = lipgloss.NewStyle().Foreground(Secondary)
+
+	// DebugBorder styles the separator between debug pane and main content.
+	DebugBorder = lipgloss.NewStyle().
+			Foreground(Muted)
 )
