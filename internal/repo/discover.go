@@ -17,6 +17,10 @@ import (
 // gitTimeout is the default timeout for git subprocesses.
 const gitTimeout = 30 * time.Second
 
+// maxParallel limits the number of concurrent git subprocesses to avoid
+// overwhelming the system when repos_dir contains many repositories.
+const maxParallel = 8
+
 // Repo represents a discovered Git repository with its GitHub identity.
 type Repo struct {
 	Owner     string // GitHub owner/org
@@ -64,18 +68,21 @@ func Discover(reposDir string) ([]Repo, error) {
 		gitDirs = append(gitDirs, dirPath)
 	}
 
-	// Parse GitHub remotes concurrently. Each goroutine writes to its
-	// own slot so no mutex is needed for the results slice.
+	// Parse GitHub remotes concurrently with bounded parallelism.
+	// Each goroutine writes to its own slot so no mutex is needed.
 	type repoResult struct {
 		repo Repo
 		ok   bool
 	}
 	results := make([]repoResult, len(gitDirs))
+	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
 	wg.Add(len(gitDirs))
 	for i, dirPath := range gitDirs {
 		go func(idx int, dir string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			owner, name, parseErr := parseGitHubRemote(dir)
 			if parseErr != nil {
 				return

@@ -33,6 +33,10 @@ const (
 // gitTimeout is the default timeout for git subprocesses.
 const gitTimeout = 60 * time.Second
 
+// maxParallel limits the number of concurrent subprocesses and API calls
+// to avoid process storms and API rate limit issues.
+const maxParallel = 8
+
 // Session tracks a Claude Code agent session.
 type Session struct {
 	ID           string    `yaml:"id"`
@@ -207,11 +211,13 @@ func (m *Manager) SpawnSession(r *repo.Repo, issueRepo string, issueNumber int, 
 
 // RefreshStatuses updates the status of all sessions by checking processes.
 // File IO for log reading is performed concurrently outside the write lock.
+// Updates are applied by session ID (not index) so concurrent mutations
+// to the sessions slice cannot cause mismatched writes.
 func (m *Manager) RefreshStatuses() {
 	// Snapshot session metadata under a read lock.
 	m.mu.RLock()
 	type sessionInfo struct {
-		idx     int
+		id      string
 		pid     int
 		status  Status
 		logFile string
@@ -219,7 +225,7 @@ func (m *Manager) RefreshStatuses() {
 	infos := make([]sessionInfo, len(m.sessions))
 	for i := range m.sessions {
 		infos[i] = sessionInfo{
-			idx:     i,
+			id:      m.sessions[i].ID,
 			pid:     m.sessions[i].PID,
 			status:  m.sessions[i].Status,
 			logFile: m.sessions[i].LogFile,
@@ -229,6 +235,7 @@ func (m *Manager) RefreshStatuses() {
 
 	// Compute new statuses and read log files concurrently (no lock held).
 	type statusUpdate struct {
+		id           string
 		newStatus    Status
 		lastActivity string
 	}
@@ -238,19 +245,21 @@ func (m *Manager) RefreshStatuses() {
 	for i, info := range infos {
 		go func(idx int, info sessionInfo) {
 			defer wg.Done()
+			upd := statusUpdate{id: info.id}
 			if !process.IsRunning(info.pid) {
 				switch {
 				case info.status == StatusRunning || info.status == StatusWaiting:
-					updates[idx] = statusUpdate{newStatus: StatusDone}
+					upd.newStatus = StatusDone
 				case info.status != StatusDone:
-					updates[idx] = statusUpdate{newStatus: StatusStopped}
+					upd.newStatus = StatusStopped
 				default:
-					updates[idx] = statusUpdate{newStatus: info.status}
+					upd.newStatus = info.status
 				}
+				updates[idx] = upd
 				return
 			}
 
-			upd := statusUpdate{newStatus: StatusRunning}
+			upd.newStatus = StatusRunning
 			if info.logFile != "" {
 				output, err := process.ReadLastLines(info.logFile, 5)
 				if err == nil && output != "" {
@@ -265,14 +274,18 @@ func (m *Manager) RefreshStatuses() {
 	}
 	wg.Wait()
 
-	// Apply updates under a write lock.
+	// Apply updates under a write lock, matching by session ID so that
+	// concurrent adds/removes don't cause mismatched index writes.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for i, upd := range updates {
-		if i < len(m.sessions) {
-			m.sessions[i].Status = upd.newStatus
-			if upd.lastActivity != "" {
-				m.sessions[i].LastActivity = upd.lastActivity
+	for _, upd := range updates {
+		for i := range m.sessions {
+			if m.sessions[i].ID == upd.id {
+				m.sessions[i].Status = upd.newStatus
+				if upd.lastActivity != "" {
+					m.sessions[i].LastActivity = upd.lastActivity
+				}
+				break
 			}
 		}
 	}
@@ -317,11 +330,14 @@ func (m *Manager) BackfillIssueTitles() error {
 		title string
 	}
 	resolvedResults := make([]resolved, len(entries))
+	semBackfill := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
 	wg.Add(len(entries))
 	for i, e := range entries {
 		go func(idx int, id, repoName, branch string) {
 			defer wg.Done()
+			semBackfill <- struct{}{}
+			defer func() { <-semBackfill }()
 			linked, err := m.gh.FindLinkedIssue(repoName, branch)
 			if err != nil || linked == nil || linked.Title == "" {
 				return
@@ -471,18 +487,21 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		wt Worktree
 	}
 
-	// List worktrees for all repos concurrently.
+	// List worktrees for all repos concurrently with bounded parallelism.
 	type scanResult struct {
 		repoName   string
 		repoDirAbs string
 		worktrees  []repoWorktree
 	}
 	scanResults := make([]scanResult, len(repos))
+	sem := make(chan struct{}, maxParallel)
 	var wgScan sync.WaitGroup
 	wgScan.Add(len(repos))
 	for i := range repos {
 		go func(idx int, r *repo.Repo) {
 			defer wgScan.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			out, gitErr := gitRun(r.LocalPath, "worktree", "list", "--porcelain")
 			if gitErr != nil {
 				return
@@ -555,14 +574,17 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		}
 	}
 
-	// Resolve issues for new worktrees concurrently (may call GitHub API).
+	// Resolve issues for new worktrees concurrently with bounded parallelism.
 	resolvedSessions := make([]Session, len(newEntries))
 	resolvedOK := make([]bool, len(newEntries))
+	semResolve := make(chan struct{}, maxParallel)
 	var wgResolve sync.WaitGroup
 	wgResolve.Add(len(newEntries))
 	for i, d := range newEntries {
 		go func(idx int, d repoWorktree) {
 			defer wgResolve.Done()
+			semResolve <- struct{}{}
+			defer func() { <-semResolve }()
 			issueNumber, issueRepo, issueTitle, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
 			if resolveErr != nil {
 				return

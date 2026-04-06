@@ -686,13 +686,21 @@ func (m *Model) fetchPRs() tea.Cmd {
 			pr  *github.PullRequest
 			err error
 		}
+		// Bound concurrency to avoid spawning too many gh subprocesses.
+		const maxParallelPR = 8
 		results := make([]prResult, len(lookups))
+		sem := make(chan struct{}, maxParallelPR)
 		var wg sync.WaitGroup
 		wg.Add(len(lookups))
 		for i, l := range lookups {
 			go func(idx int, repoName, branch string) {
 				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
 				pr, err := m.gh.FindPRForBranch(repoName, branch)
+				if err != nil {
+					err = fmt.Errorf("%s@%s: %w", repoName, branch, err)
+				}
 				results[idx] = prResult{
 					key: prCacheKey(repoName, branch),
 					pr:  pr,

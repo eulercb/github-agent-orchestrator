@@ -63,6 +63,10 @@ type PRStatus struct {
 	ReviewRequired   bool
 }
 
+// maxParallelGH limits the number of concurrent gh CLI subprocesses to
+// avoid overwhelming the system and hitting API rate limits.
+const maxParallelGH = 8
+
 // Client interacts with GitHub via the gh CLI.
 type Client struct{}
 
@@ -151,18 +155,21 @@ func hasTypeQualifier(query string) bool {
 // Results from all repos are merged. The search parameter is passed to --search
 // when non-empty. Each returned PR has its Repository field set.
 func (c *Client) ListPRs(repos []string, search string) ([]PullRequest, error) {
-	// Fetch PRs from all repos concurrently. Each goroutine writes to
-	// its own slot so the results stay in deterministic order.
+	// Fetch PRs from all repos concurrently with bounded parallelism.
+	// Each goroutine writes to its own slot for deterministic order.
 	type prResult struct {
 		prs []PullRequest
 		err error
 	}
 	results := make([]prResult, len(repos))
+	sem := make(chan struct{}, maxParallelGH)
 	var wg sync.WaitGroup
 	wg.Add(len(repos))
 	for i, repoFullName := range repos {
 		go func(idx int, repoName string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			args := []string{"pr", "list",
 				"--repo", repoName,
 				"--state", "open",
