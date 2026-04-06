@@ -14,13 +14,16 @@ gao is configured via a YAML file at `~/.config/gao/config.yaml`. Run `gao init`
 # Required.
 repos_dir: "~/code"
 
-# GitHub search syntax filters for the Issues and PRs panels.
-# These are global — issue/PR results come from GitHub search, not
-# scoped to a single repo. Use repo: qualifiers to narrow scope.
-# Default issue_filter: "is:open assignee:@me"
-# Default pr_filter: "is:open author:@me"
+# Whether to show the Issues panel. When false, the dashboard shows
+# only the Sessions panel. Toggle at runtime with the 'i' key.
+# Default: true
+track_issues: true
+
+# GitHub search syntax filter for the Issues panel.
+# This is global — issue results come from GitHub search, not scoped
+# to a single repo. Use repo: qualifiers to narrow scope.
+# Default: "is:open assignee:@me"
 issue_filter: "is:open assignee:@me"
-pr_filter: "is:open author:@me"
 
 # How Claude Code sessions are spawned.
 spawn:

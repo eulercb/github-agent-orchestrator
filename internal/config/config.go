@@ -13,8 +13,8 @@ import (
 // Config is the top-level configuration for gao.
 type Config struct {
 	ReposDir    string        `yaml:"repos_dir"`
+	TrackIssues bool          `yaml:"track_issues"`
 	IssueFilter string        `yaml:"issue_filter"`
-	PRFilter    string        `yaml:"pr_filter"`
 	Spawn       SpawnConfig   `yaml:"spawn"`
 	StatusBar   StatusBar     `yaml:"status_bar"`
 	Attach      AttachConfig  `yaml:"attach"`
@@ -25,10 +25,6 @@ type Config struct {
 // DefaultIssueFilter is the fallback issue filter used when no search query
 // is configured. It shows open issues assigned to the current user.
 const DefaultIssueFilter = "is:open assignee:@me"
-
-// DefaultPRFilter is the fallback PR filter used when no search query
-// is configured. It shows open PRs authored by the current user.
-const DefaultPRFilter = "is:open author:@me"
 
 // SpawnConfig controls how Claude Code sessions are created.
 type SpawnConfig struct {
@@ -56,8 +52,8 @@ type CCUsageConfig struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
+		TrackIssues: true,
 		IssueFilter: DefaultIssueFilter,
-		PRFilter:    DefaultPRFilter,
 		Spawn: SpawnConfig{
 			Command:     "claude --dangerously-skip-permissions",
 			UseWorktree: true,

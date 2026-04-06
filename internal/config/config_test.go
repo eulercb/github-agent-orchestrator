@@ -16,7 +16,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.True(t, cfg.Spawn.UseWorktree, "expected worktree to be enabled by default")
 	assert.False(t, cfg.CCUsage.Enabled, "expected ccusage to be disabled by default")
 	assert.Equal(t, DefaultIssueFilter, cfg.IssueFilter)
-	assert.Equal(t, DefaultPRFilter, cfg.PRFilter)
+	assert.True(t, cfg.TrackIssues, "expected track_issues to be enabled by default")
 }
 
 func TestLoadMissingConfig(t *testing.T) {
@@ -35,7 +35,7 @@ func TestSaveAndLoad(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.ReposDir = "/tmp/repos"
 	cfg.IssueFilter = "is:open assignee:@me repo:testowner/testrepo"
-	cfg.PRFilter = "is:open author:@me"
+	cfg.TrackIssues = false
 
 	require.NoError(t, Save(&cfg))
 
@@ -49,7 +49,7 @@ func TestSaveAndLoad(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/repos", loaded.ReposDir)
 	assert.Equal(t, "is:open assignee:@me repo:testowner/testrepo", loaded.IssueFilter)
-	assert.Equal(t, "is:open author:@me", loaded.PRFilter)
+	assert.False(t, loaded.TrackIssues)
 }
 
 func TestExpandReposDir(t *testing.T) {

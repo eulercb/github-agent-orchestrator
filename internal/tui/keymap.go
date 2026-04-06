@@ -14,10 +14,10 @@ type KeyMap struct {
 	ImportWorktrees key.Binding
 	Open            key.Binding
 	Delete          key.Binding
-	ClearSession    key.Binding
 	Refresh         key.Binding
 	Help            key.Binding
 	Filter          key.Binding
+	ToggleIssues    key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -64,10 +64,6 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("x"),
 			key.WithHelp("x", "kill session"),
 		),
-		ClearSession: key.NewBinding(
-			key.WithKeys("c"),
-			key.WithHelp("c", "clear session"),
-		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh"),
@@ -79,6 +75,10 @@ func DefaultKeyMap() KeyMap {
 		Filter: key.NewBinding(
 			key.WithKeys("/"),
 			key.WithHelp("/", "filter"),
+		),
+		ToggleIssues: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "toggle issues"),
 		),
 	}
 }

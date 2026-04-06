@@ -26,7 +26,6 @@ type Panel int
 const (
 	PanelIssues Panel = iota
 	PanelSessions
-	PanelPRs
 )
 
 // View identifies the current screen.
@@ -62,19 +61,21 @@ type Model struct {
 	currentView   View
 	activePanel   Panel
 	issues        []github.Issue
-	prList        []github.PullRequest
 	prCache       map[string]*github.PullRequest // "repo:branch" -> PR
 	issuesCursor  int
 	sessionCursor int
-	prCursor      int
 	statusBarText string
 	errorMsg      string
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
 	issueFilter   string
-	prFilter      string
 	filterInput   textinput.Model
+
+	// Issues pane visibility
+	showIssues        bool
+	issuesInitialized bool
+	filterForToggle   bool // true when filter editor was opened by toggle
 }
 
 // NewModel creates the initial TUI model.
@@ -93,7 +94,6 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 	if issueFilter == "" {
 		issueFilter = config.DefaultIssueFilter
 	}
-	prFilter := cfg.PRFilter
 
 	ti.SetValue(issueFilter)
 
@@ -108,20 +108,32 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		repos = discovered
 	}
 
+	showIssues := cfg.TrackIssues
+
 	return Model{
-		cfg:         cfg,
-		gh:          ghClient,
-		sessions:    sessMgr,
-		statusProv:  statusbar.NewProvider(sbCmd, nil),
-		keys:        DefaultKeyMap(),
-		prCache:     make(map[string]*github.PullRequest),
-		repos:       repos,
-		errorMsg:    initErr,
-		issueFilter: issueFilter,
-		prFilter:    prFilter,
-		filterInput: ti,
-		cfgPath:     cfgPath,
+		cfg:               cfg,
+		gh:                ghClient,
+		sessions:          sessMgr,
+		statusProv:        statusbar.NewProvider(sbCmd, nil),
+		keys:              DefaultKeyMap(),
+		prCache:           make(map[string]*github.PullRequest),
+		repos:             repos,
+		errorMsg:          initErr,
+		issueFilter:       issueFilter,
+		filterInput:       ti,
+		cfgPath:           cfgPath,
+		showIssues:        showIssues,
+		issuesInitialized: showIssues,
+		activePanel:       panelForStart(showIssues),
 	}
+}
+
+// panelForStart returns the initial active panel based on issues visibility.
+func panelForStart(showIssues bool) Panel {
+	if showIssues {
+		return PanelIssues
+	}
+	return PanelSessions
 }
 
 // Messages
@@ -133,11 +145,6 @@ type issuesLoadedMsg struct {
 
 type prsLoadedMsg struct {
 	prs map[string]*github.PullRequest
-	err error
-}
-
-type prListLoadedMsg struct {
-	prs []github.PullRequest
 	err error
 }
 
@@ -176,13 +183,15 @@ type errMsg struct {
 
 // Init starts the application.
 func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface requires value receiver
-	return tea.Batch(
-		m.fetchIssues(),
-		m.fetchPRList(),
+	cmds := []tea.Cmd{
 		m.refreshStatuses(),
 		m.syncWorktrees(),
 		m.tickCmd(),
-	)
+	}
+	if m.showIssues {
+		cmds = append(cmds, m.fetchIssues())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages.
@@ -217,6 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		} else {
 			m.issues = msg.issues
 			m.errorMsg = ""
+			m.issuesInitialized = true
 			// Clamp cursor to new list bounds
 			lastIdx := len(m.issues) - 1
 			if lastIdx < 0 {
@@ -238,22 +248,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		} else {
 			m.prCache = msg.prs
 			m.errorMsg = ""
-		}
-		return m, filterCmd
-	case prListLoadedMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("PR list refresh: %v", msg.err)
-		} else {
-			m.prList = msg.prs
-			m.errorMsg = ""
-			lastIdx := len(m.prList) - 1
-			if lastIdx < 0 {
-				lastIdx = 0
-			}
-			if m.prCursor > lastIdx {
-				m.prCursor = lastIdx
-			}
 		}
 		return m, filterCmd
 	case statusRefreshMsg:
@@ -325,9 +319,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		m.sessions.RefreshStatuses()
 		cmd := m.fetchPRs()
 		cmds := []tea.Cmd{filterCmd, m.tickCmd(), cmd, m.refreshStatusBar()}
-		if m.activePanel == PanelPRs {
-			cmds = append(cmds, m.fetchPRList())
-		}
 		return m, tea.Batch(cmds...)
 	case errMsg:
 		m.errorMsg = msg.err.Error()
@@ -369,20 +360,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Help):
 		m.currentView = ViewHelp
 	case key.Matches(msg, m.keys.Tab):
-		switch m.activePanel {
-		case PanelIssues:
-			m.activePanel = PanelSessions
-		case PanelSessions:
-			m.activePanel = PanelPRs
-		case PanelPRs:
-			m.activePanel = PanelIssues
+		if m.showIssues {
+			switch m.activePanel {
+			case PanelIssues:
+				m.activePanel = PanelSessions
+			case PanelSessions:
+				m.activePanel = PanelIssues
+			}
 		}
 	case key.Matches(msg, m.keys.Up):
 		m.moveCursor(-1)
 	case key.Matches(msg, m.keys.Down):
 		m.moveCursor(1)
 	case key.Matches(msg, m.keys.Spawn):
-		if m.activePanel == PanelIssues {
+		if m.activePanel == PanelIssues && m.showIssues {
 			cmd := m.spawnSession()
 			return m, cmd
 		}
@@ -401,15 +392,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.activePanel == PanelSessions {
 			m.killSession()
 		}
-	case key.Matches(msg, m.keys.ClearSession):
-		if m.activePanel == PanelPRs {
-			m.clearSessionForPR()
-		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
-		return m, tea.Batch(m.fetchIssues(), m.fetchPRList(), m.refreshStatuses())
+		cmds := []tea.Cmd{m.refreshStatuses()}
+		if m.showIssues {
+			cmds = append(cmds, m.fetchIssues())
+		}
+		return m, tea.Batch(cmds...)
 	case key.Matches(msg, m.keys.Filter):
-		if m.activePanel == PanelSessions {
+		if m.activePanel != PanelIssues || !m.showIssues {
 			break
 		}
 		m.currentView = ViewFilter
@@ -419,19 +410,61 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			inputWidth = 20
 		}
 		m.filterInput.Width = inputWidth
-		// Populate the editor with the current filter for the active panel.
-		switch m.activePanel {
-		case PanelPRs:
-			m.filterInput.Placeholder = config.DefaultPRFilter
-			m.filterInput.SetValue(m.prFilter)
-		default:
-			m.filterInput.Placeholder = config.DefaultIssueFilter
-			m.filterInput.SetValue(m.issueFilter)
+		m.filterInput.Placeholder = config.DefaultIssueFilter
+		m.filterInput.SetValue(m.issueFilter)
+		m.filterInput.Focus()
+		return m, m.filterInput.Cursor.BlinkCmd()
+	case key.Matches(msg, m.keys.ToggleIssues):
+		return m.toggleIssues()
+	}
+	return m, nil
+}
+
+// toggleIssues handles showing/hiding the issues pane.
+func (m *Model) toggleIssues() (tea.Model, tea.Cmd) {
+	if m.showIssues {
+		// Hide issues
+		m.cfg.TrackIssues = false
+		if err := config.Save(m.cfg); err != nil {
+			m.cfg.TrackIssues = true
+			m.errorMsg = fmt.Sprintf("Save config: %v", err)
+			return m, nil
 		}
+		m.showIssues = false
+		if m.activePanel == PanelIssues {
+			m.activePanel = PanelSessions
+		}
+		return m, nil
+	}
+
+	// Show issues
+	m.cfg.TrackIssues = true
+	if err := config.Save(m.cfg); err != nil {
+		m.cfg.TrackIssues = false
+		m.errorMsg = fmt.Sprintf("Save config: %v", err)
+		return m, nil
+	}
+	m.showIssues = true
+
+	if !m.issuesInitialized {
+		// First time: open filter editor so user can configure the query
+		m.activePanel = PanelIssues
+		m.filterForToggle = true
+		m.currentView = ViewFilter
+		inputWidth := m.width - 10
+		if inputWidth < 20 {
+			inputWidth = 20
+		}
+		m.filterInput.Width = inputWidth
+		m.filterInput.Placeholder = config.DefaultIssueFilter
+		m.filterInput.SetValue(m.issueFilter)
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()
 	}
-	return m, nil
+
+	m.activePanel = PanelIssues
+	cmd := m.fetchIssues()
+	return m, cmd
 }
 
 // updateFilter handles all messages while the filter editor is active.
@@ -447,11 +480,13 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Blur()
 			query := strings.TrimSpace(m.filterInput.Value())
 			m.loading = true
-			if m.activePanel == PanelPRs {
-				m.prFilter = query
-				m.prCursor = 0
-				cmd := m.fetchPRList()
-				return m, cmd
+			m.filterForToggle = false
+			// Persist the filter to config
+			prevFilter := m.cfg.IssueFilter
+			m.cfg.IssueFilter = query
+			if err := config.Save(m.cfg); err != nil {
+				m.cfg.IssueFilter = prevFilter
+				m.errorMsg = fmt.Sprintf("Save config: %v", err)
 			}
 			m.issueFilter = query
 			m.issuesCursor = 0
@@ -461,10 +496,18 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Cancel: restore the previous value.
 			m.currentView = ViewDashboard
 			m.filterInput.Blur()
-			if m.activePanel == PanelPRs {
-				m.filterInput.SetValue(m.prFilter)
-			} else {
-				m.filterInput.SetValue(m.issueFilter)
+			m.filterInput.SetValue(m.issueFilter)
+			// If this filter was opened by toggle and user cancels,
+			// revert the toggle.
+			if m.filterForToggle {
+				m.filterForToggle = false
+				m.cfg.TrackIssues = false
+				if err := config.Save(m.cfg); err != nil {
+					m.cfg.TrackIssues = true
+					m.errorMsg = fmt.Sprintf("Save config: %v", err)
+				}
+				m.showIssues = false
+				m.activePanel = PanelSessions
 			}
 			return m, nil
 		}
@@ -510,18 +553,6 @@ func (m *Model) moveCursor(delta int) {
 		if m.sessionCursor > lastIdx {
 			m.sessionCursor = lastIdx
 		}
-	case PanelPRs:
-		m.prCursor += delta
-		if m.prCursor < 0 {
-			m.prCursor = 0
-		}
-		lastIdx := len(m.prList) - 1
-		if lastIdx < 0 {
-			lastIdx = 0
-		}
-		if m.prCursor > lastIdx {
-			m.prCursor = lastIdx
-		}
 	}
 }
 
@@ -536,23 +567,6 @@ func (m *Model) selectedSession() *claude.Session {
 	sessions := m.sessions.Sessions()
 	if m.sessionCursor >= 0 && m.sessionCursor < len(sessions) {
 		return &sessions[m.sessionCursor]
-	}
-	return nil
-}
-
-func (m *Model) selectedPR() *github.PullRequest {
-	if m.prCursor >= 0 && m.prCursor < len(m.prList) {
-		return &m.prList[m.prCursor]
-	}
-	return nil
-}
-
-func (m *Model) findSessionByRepoBranch(repoName, branch string) *claude.Session {
-	sessions := m.sessions.Sessions()
-	for i := range sessions {
-		if sessions[i].Repo == repoName && sessions[i].Branch == branch {
-			return &sessions[i]
-		}
 	}
 	return nil
 }
@@ -578,21 +592,6 @@ func (m *Model) fetchIssues() tea.Cmd {
 	return func() tea.Msg {
 		issues, err := m.gh.ListIssues(search)
 		return issuesLoadedMsg{issues: issues, err: err}
-	}
-}
-
-func (m *Model) fetchPRList() tea.Cmd {
-	search := m.prFilter
-	var repoNames []string
-	for i := range m.repos {
-		repoNames = append(repoNames, m.repos[i].FullName())
-	}
-	return func() tea.Msg {
-		if len(repoNames) == 0 {
-			return prListLoadedMsg{err: fmt.Errorf("no repos discovered in repos_dir")}
-		}
-		prs, err := m.gh.ListPRs(repoNames, search)
-		return prListLoadedMsg{prs: prs, err: err}
 	}
 }
 
@@ -766,20 +765,6 @@ func (m *Model) openInBrowser() tea.Cmd {
 				return openBrowserMsg{err: ghClient.OpenInBrowser(repoName, number)}
 			}
 		}
-	case PanelPRs:
-		pr := m.selectedPR()
-		if pr == nil {
-			return nil
-		}
-		repoName := pr.Repository.NameWithOwner
-		if repoName == "" {
-			return nil
-		}
-		number := pr.Number
-		ghClient := m.gh
-		return func() tea.Msg {
-			return openBrowserMsg{err: ghClient.OpenInBrowser(repoName, number)}
-		}
 	}
 	return nil
 }
@@ -792,28 +777,6 @@ func (m *Model) killSession() {
 
 	sessID := sess.ID
 	m.confirmMsg = fmt.Sprintf("Kill session %q? (y/n)", sess.ID)
-	m.currentView = ViewConfirm
-	m.confirmAction = func() tea.Msg {
-		err := m.sessions.RemoveSession(sessID, true)
-		return sessionKilledMsg{id: sessID, err: err}
-	}
-}
-
-func (m *Model) clearSessionForPR() {
-	pr := m.selectedPR()
-	if pr == nil {
-		return
-	}
-	repoName := pr.Repository.NameWithOwner
-
-	sess := m.findSessionByRepoBranch(repoName, pr.HeadRef)
-	if sess == nil {
-		m.errorMsg = fmt.Sprintf("No session found for PR #%d", pr.Number)
-		return
-	}
-
-	sessID := sess.ID
-	m.confirmMsg = fmt.Sprintf("Clear session %q for PR #%d? (y/n)", sess.ID, pr.Number)
 	m.currentView = ViewConfirm
 	m.confirmAction = func() tea.Msg {
 		err := m.sessions.RemoveSession(sessID, true)
