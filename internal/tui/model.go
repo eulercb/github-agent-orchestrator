@@ -840,22 +840,10 @@ func (m *Model) attachSession() tea.Cmd {
 }
 
 // resolveAttachStrategy determines which attach method to use. It respects
-// explicit config, migrates the deprecated use_warp flag, and auto-detects
-// tmux / Warp when strategy is "auto" (or empty).
+// explicit config and auto-detects tmux / Warp when strategy is "auto"
+// (or empty).
 func (m *Model) resolveAttachStrategy() config.AttachStrategy {
 	s := m.cfg.Attach.Strategy
-
-	// Migrate deprecated use_warp field when strategy is unset or auto.
-	if s == "" || s == config.AttachAuto {
-		if m.cfg.Attach.UseWarp != nil {
-			if *m.cfg.Attach.UseWarp {
-				return config.AttachWarp
-			}
-			// use_warp: false — skip Warp in auto-detection, fall through
-			// to tmux → interactive.
-			return m.autoDetectNoWarp()
-		}
-	}
 
 	if s != "" && s != config.AttachAuto {
 		if isValidStrategy(s) {
@@ -865,19 +853,6 @@ func (m *Model) resolveAttachStrategy() config.AttachStrategy {
 	}
 
 	// Auto-detect: tmux → Warp → interactive.
-	return m.autoDetect()
-}
-
-func isValidStrategy(s config.AttachStrategy) bool {
-	switch s {
-	case config.AttachAuto, config.AttachTmux, config.AttachWarp,
-		config.AttachCommand, config.AttachInteractive:
-		return true
-	}
-	return false
-}
-
-func (m *Model) autoDetect() config.AttachStrategy {
 	if os.Getenv("TMUX") != "" {
 		if _, err := exec.LookPath("tmux"); err == nil {
 			return config.AttachTmux
@@ -891,13 +866,13 @@ func (m *Model) autoDetect() config.AttachStrategy {
 	return config.AttachInteractive
 }
 
-func (m *Model) autoDetectNoWarp() config.AttachStrategy {
-	if os.Getenv("TMUX") != "" {
-		if _, err := exec.LookPath("tmux"); err == nil {
-			return config.AttachTmux
-		}
+func isValidStrategy(s config.AttachStrategy) bool {
+	switch s {
+	case config.AttachAuto, config.AttachTmux, config.AttachWarp,
+		config.AttachCommand, config.AttachInteractive:
+		return true
 	}
-	return config.AttachInteractive
+	return false
 }
 
 // resolveAttachCommand builds the attach command for a session's worktree directory.

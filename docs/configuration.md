@@ -63,14 +63,6 @@ attach:
   # Default: ""
   command: ""
 
-  # Deprecated: retained for backwards compatibility with older configs.
-  # When strategy is unset or "auto", gao still recognizes use_warp:
-  #   true  → prefer Warp
-  #   false → skip Warp in auto-detection
-  # If strategy is explicitly set to a non-"auto" value, strategy wins.
-  # Prefer using strategy: warp instead.
-  # use_warp: null
-
 # Bottom status bar. Can be populated by a custom script.
 status_bar:
   # Shell command whose stdout becomes the status bar text.

@@ -68,11 +68,6 @@ type AttachConfig struct {
 	// single quotes in shell templates such as sh -c '...'.
 	// Example: "gnome-terminal -- sh -c \"{cmd}; exec bash\""
 	Command string `yaml:"command"`
-
-	// UseWarp is deprecated; use strategy: warp instead.
-	// Kept for backwards compatibility — when set and strategy is empty
-	// or "auto", it is migrated to the equivalent strategy.
-	UseWarp *bool `yaml:"use_warp,omitempty"`
 }
 
 // CCUsageConfig configures optional ccusage integration.
