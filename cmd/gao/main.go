@@ -88,8 +88,8 @@ func run() error {
 		if cfg.ReposDir == "" {
 			fmt.Printf("No repos_dir configured. Add it to %s:\n\n", cfgPath)
 			fmt.Println("repos_dir: ~/code")
+			fmt.Println("track_issues: true")
 			fmt.Println("issue_filter: 'is:open assignee:@me'")
-			fmt.Println("pr_filter: 'is:open author:@me'")
 			fmt.Println()
 			return nil
 		}
@@ -151,8 +151,10 @@ func doInit() error {
 	}
 
 	cfg.ReposDir = prompt(scanner, "Root directory for repos (git repos will be auto-discovered)", detectedReposDir)
-	cfg.IssueFilter = prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultIssueFilter)
-	cfg.PRFilter = prompt(scanner, "PR filter (GitHub search syntax)", config.DefaultPRFilter)
+	cfg.TrackIssues = promptYesNo(scanner, "Track GitHub issues?", true)
+	if cfg.TrackIssues {
+		cfg.IssueFilter = prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultIssueFilter)
+	}
 
 	if err := config.Save(&cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -177,6 +179,22 @@ func prompt(scanner *bufio.Scanner, label, defaultVal string) string {
 	return defaultVal
 }
 
+// promptYesNo asks the user a yes/no question with a default value.
+func promptYesNo(scanner *bufio.Scanner, label string, defaultVal bool) bool {
+	defStr := "Y/n"
+	if !defaultVal {
+		defStr = "y/N"
+	}
+	fmt.Printf("%s [%s]: ", label, defStr)
+	if scanner.Scan() {
+		input := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		if input != "" {
+			return input == "y" || input == "yes"
+		}
+	}
+	return defaultVal
+}
+
 func printUsage() {
 	fmt.Printf(`gao - GitHub Agent Orchestrator v%s
 
@@ -190,12 +208,13 @@ Config: ~/.config/gao/config.yaml
 
 Dashboard controls:
   ↑↓/jk           Navigate
-  Tab              Switch panels (Issues ↔ Sessions ↔ PRs)
-  /                Edit issue/PR filter (GitHub search syntax)
+  Tab              Switch panels (Issues ↔ Sessions)
+  /                Edit issue filter (GitHub search syntax)
   s                Spawn Claude Code session for selected issue
   a                Attach to selected session
   o                Open issue/PR in browser
   x                Kill selected session
+  i                Toggle issues panel
   r                Refresh
   ?                Help
   q                Quit
