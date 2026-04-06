@@ -67,12 +67,47 @@ type PRStatus struct {
 // avoid overwhelming the system and hitting API rate limits.
 const maxParallelGH = 8
 
-// Client interacts with GitHub via the gh CLI.
-type Client struct{}
+// PRCacheTTL is the default time-to-live for cached PR lookups.
+// Subsequent FindPRForBranch calls within this window return the
+// cached result without spawning a gh subprocess.
+const PRCacheTTL = 60 * time.Second
 
-// NewClient returns a new GitHub client.
+// prCacheEntry holds a cached PR lookup result.
+type prCacheEntry struct {
+	pr        *PullRequest
+	fetchedAt time.Time
+}
+
+// Client interacts with GitHub via the gh CLI.
+type Client struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	mu      sync.RWMutex
+	prCache map[string]*prCacheEntry
+}
+
+// NewClient returns a new GitHub client with a cancellable context.
+// Call Close() when the client is no longer needed to cancel in-flight requests.
 func NewClient() *Client {
-	return &Client{}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Client{
+		ctx:     ctx,
+		cancel:  cancel,
+		prCache: make(map[string]*prCacheEntry),
+	}
+}
+
+// Close cancels all in-flight gh CLI calls.
+func (c *Client) Close() {
+	c.cancel()
+}
+
+// InvalidatePRCache clears the PR lookup cache so the next
+// FindPRForBranch call fetches fresh data.
+func (c *Client) InvalidatePRCache() {
+	c.mu.Lock()
+	c.prCache = make(map[string]*prCacheEntry)
+	c.mu.Unlock()
 }
 
 // ListIssues fetches issues using "gh search issues" with the given search
@@ -99,7 +134,7 @@ func (c *Client) ListIssues(search string) ([]Issue, error) {
 		"--limit", "50",
 	)
 
-	out, err := runGH(args...)
+	out, err := runGHCtx(c.ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search issues: %w", err)
 	}
@@ -180,7 +215,7 @@ func (c *Client) ListPRs(repos []string, search string) ([]PullRequest, error) {
 				args = append(args, "--search", search)
 			}
 
-			out, err := runGH(args...)
+			out, err := runGHCtx(c.ctx, args...)
 			if err != nil {
 				results[idx] = prResult{err: fmt.Errorf("list PRs for %s: %w", repoName, err)}
 				return
@@ -237,7 +272,7 @@ func (c *Client) FindPRForIssue(prRepo, issueRepo string, issueNumber int) (*Pul
 		"--limit", "1",
 	}
 
-	out, err := runGH(args...)
+	out, err := runGHCtx(c.ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("find PR for issue %s#%d: %w", issueRepo, issueNumber, err)
 	}
@@ -254,7 +289,18 @@ func (c *Client) FindPRForIssue(prRepo, issueRepo string, issueNumber int) (*Pul
 }
 
 // FindPRForBranch looks for a PR with the given head branch.
+// Results are cached for PRCacheTTL to avoid redundant gh CLI calls.
 func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, error) {
+	key := repoFullName + ":" + branch
+
+	// Check cache first.
+	c.mu.RLock()
+	if entry, ok := c.prCache[key]; ok && time.Since(entry.fetchedAt) < PRCacheTTL {
+		c.mu.RUnlock()
+		return entry.pr, nil
+	}
+	c.mu.RUnlock()
+
 	args := []string{"pr", "list",
 		"--repo", repoFullName,
 		"--head", branch,
@@ -263,7 +309,7 @@ func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, err
 		"--limit", "1",
 	}
 
-	out, err := runGH(args...)
+	out, err := runGHCtx(c.ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("find PR for branch %s: %w", branch, err)
 	}
@@ -273,10 +319,17 @@ func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, err
 		return nil, fmt.Errorf("parse PRs: %w", err)
 	}
 
-	if len(prs) == 0 {
-		return nil, nil
+	var result *PullRequest
+	if len(prs) > 0 {
+		result = &prs[0]
 	}
-	return &prs[0], nil
+
+	// Store in cache.
+	c.mu.Lock()
+	c.prCache[key] = &prCacheEntry{pr: result, fetchedAt: time.Now()}
+	c.mu.Unlock()
+
+	return result, nil
 }
 
 // GetPRStatus returns a summarized PR status.
@@ -327,7 +380,7 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
   }
 }`, owner, name, branch)
 
-	out, err := runGH("api", "graphql", "-f", "query="+query)
+	out, err := runGHCtx(c.ctx, "api", "graphql", "-f", "query="+query)
 	if err != nil {
 		return nil, fmt.Errorf("graphql linked issues: %w", err)
 	}
@@ -388,12 +441,14 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
 
 // OpenInBrowser opens an issue or PR in the default browser using gh browse.
 func (c *Client) OpenInBrowser(repo string, number int) error {
-	_, err := runGH("browse", strconv.Itoa(number), "--repo", repo)
+	_, err := runGHCtx(c.ctx, "browse", strconv.Itoa(number), "--repo", repo)
 	return err
 }
 
-func runGH(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+// runGHCtx executes the gh CLI with the given context and arguments.
+// The context is used for cancellation; a 30-second timeout is layered on top.
+func runGHCtx(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	out, err := cmd.Output()

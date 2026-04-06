@@ -392,6 +392,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Dashboard keys
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		m.gh.Close()
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
 		m.currentView = ViewHelp
@@ -439,7 +440,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
-		m.debugLog.Info("Manual refresh triggered")
+		m.gh.InvalidatePRCache()
+		m.debugLog.Info("Manual refresh triggered (PR cache invalidated)")
 		cmds := []tea.Cmd{m.refreshStatuses()}
 		if m.showIssues {
 			// issuesLoadedMsg triggers fetchPRs after issues load.
@@ -524,6 +526,7 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			m.gh.Close()
 			return m, tea.Quit
 		case tea.KeyEnter:
 			// Apply the filter and refresh the active panel's data.
