@@ -67,6 +67,7 @@ type Model struct {
 	statusBarText string
 	errorMsg      string
 	scanning      bool
+	refreshing    bool
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
@@ -240,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
+		m.refreshing = false
 		// Replace the cache with the latest refresh so stale entries
 		// (e.g. deleted PRs) are cleared.
 		m.prCache = msg.prs
@@ -401,7 +403,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
-		cmds := []tea.Cmd{m.refreshStatuses()}
+		m.refreshing = true
+		cmds := []tea.Cmd{m.refreshStatuses(), m.fetchPRs()}
 		if m.showIssues {
 			cmds = append(cmds, m.fetchIssues())
 		}
