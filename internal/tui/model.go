@@ -845,12 +845,9 @@ func (m *Model) openWorktree() tea.Cmd {
 
 	// Fallback: open a shell interactively (suspends TUI).
 	dbg.Info(fmt.Sprintf("Opening worktree for %s interactively", sessID))
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "sh"
-	}
 	return tea.ExecProcess(
-		exec.CommandContext(context.Background(), shell, "-l"),
+		exec.CommandContext(context.Background(),
+			"sh", "-c", "cd "+shellQuoteSession(workDir)+" && exec \"${SHELL:-sh}\" -l"),
 		func(err error) tea.Msg {
 			if err != nil {
 				return errMsg{err: fmt.Errorf("open worktree: %w", err)}
