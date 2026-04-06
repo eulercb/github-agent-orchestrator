@@ -143,6 +143,7 @@ func (m *Manager) SpawnSession(r *repo.Repo, issueRepo string, issueNumber int, 
 		if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
 			IssueNumber: issueNumber,
 			IssueRepo:   issueRepo,
+			IssueTitle:  issueTitle,
 		}); writeErr != nil {
 			return nil, fmt.Errorf("persist worktree metadata: %w", writeErr)
 		}
@@ -288,6 +289,7 @@ type Worktree struct {
 type worktreeMetadata struct {
 	IssueNumber int    `yaml:"issue_number"`
 	IssueRepo   string `yaml:"issue_repo,omitempty"`
+	IssueTitle  string `yaml:"issue_title,omitempty"`
 }
 
 // metadataFile is the relative path to the gao metadata file inside a worktree.
@@ -412,7 +414,7 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 	// Resolve issues for new worktrees outside the lock (may call GitHub API).
 	var newSessions []Session
 	for _, d := range newEntries {
-		issueNumber, issueRepo, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
+		issueNumber, issueRepo, issueTitle, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
 		if resolveErr != nil {
 			continue
 		}
@@ -420,6 +422,7 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		newSessions = append(newSessions, Session{
 			ID:           name,
 			IssueNumber:  issueNumber,
+			IssueTitle:   issueTitle,
 			Repo:         d.r.FullName(),
 			IssueRepo:    issueRepo,
 			Branch:       d.wt.Branch,
@@ -515,14 +518,14 @@ func parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
-// resolveWorktreeIssue determines the issue number and repo for a worktree.
-func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber int, issueRepo string, err error) {
+// resolveWorktreeIssue determines the issue number, repo, and title for a worktree.
+func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber int, issueRepo, issueTitle string, err error) {
 	meta, metaErr := readWorktreeMetadata(wt.Path)
 	if metaErr != nil {
-		return 0, "", metaErr
+		return 0, "", "", metaErr
 	}
 	if meta != nil && meta.IssueNumber > 0 {
-		return meta.IssueNumber, meta.IssueRepo, nil
+		return meta.IssueNumber, meta.IssueRepo, meta.IssueTitle, nil
 	}
 
 	if m.gh != nil && wt.Branch != "" {
@@ -532,12 +535,13 @@ func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber 
 			_ = writeWorktreeMetadata(wt.Path, &worktreeMetadata{
 				IssueNumber: linked.Number,
 				IssueRepo:   issueRepo,
+				IssueTitle:  linked.Title,
 			})
-			return linked.Number, issueRepo, nil
+			return linked.Number, issueRepo, linked.Title, nil
 		}
 	}
 
-	return 0, "", nil
+	return 0, "", "", nil
 }
 
 // buildSessionName generates a human-readable session ID.

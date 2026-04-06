@@ -271,6 +271,7 @@ func (c *Client) GetPRStatus(pr *PullRequest) PRStatus {
 // closing references (e.g. "Closes #42" in the PR body).
 type LinkedIssue struct {
 	Number     int    `json:"number"`
+	Title      string `json:"title"`
 	Repository string `json:"repository"` // "owner/name"
 }
 
@@ -290,6 +291,7 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
         closingIssuesReferences(first: 1) {
           nodes {
             number
+            title
             repository { nameWithOwner }
           }
         }
@@ -310,7 +312,8 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
 					Nodes []struct {
 						ClosingIssuesReferences struct {
 							Nodes []struct {
-								Number     int `json:"number"`
+								Number     int    `json:"number"`
+								Title      string `json:"title"`
 								Repository struct {
 									NameWithOwner string `json:"nameWithOwner"`
 								} `json:"repository"`
@@ -351,6 +354,7 @@ func (c *Client) FindLinkedIssue(repoFullName, branch string) (*LinkedIssue, err
 
 	return &LinkedIssue{
 		Number:     issues[0].Number,
+		Title:      issues[0].Title,
 		Repository: issues[0].Repository.NameWithOwner,
 	}, nil
 }
