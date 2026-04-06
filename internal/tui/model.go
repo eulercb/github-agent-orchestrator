@@ -152,7 +152,9 @@ type prsLoadedMsg struct {
 
 type statusRefreshMsg struct{}
 
-type titlesBackfilledMsg struct{}
+type titlesBackfilledMsg struct {
+	err error
+}
 
 type statusBarUpdatedMsg struct {
 	text string
@@ -224,7 +226,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		m.height = msg.Height
 		return m, filterCmd
 	case issuesLoadedMsg:
-		m.loading = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Failed to load issues: %v", msg.err)
 		} else {
@@ -326,6 +327,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		// Always refresh PRs and backfill missing issue titles after sync.
 		return m, tea.Batch(filterCmd, m.fetchPRs(), m.backfillTitles())
 	case titlesBackfilledMsg:
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("Title backfill: %v", msg.err)
+		}
 		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
@@ -420,9 +424,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
-		cmds := []tea.Cmd{m.refreshStatuses(), m.fetchPRs()}
+		cmds := []tea.Cmd{m.refreshStatuses()}
 		if m.showIssues {
+			// issuesLoadedMsg triggers fetchPRs after issues load.
 			cmds = append(cmds, m.fetchIssues())
+		} else {
+			cmds = append(cmds, m.fetchPRs())
 		}
 		return m, tea.Batch(cmds...)
 	case key.Matches(msg, m.keys.Filter):
@@ -653,8 +660,8 @@ func (m *Model) refreshStatuses() tea.Cmd {
 func (m *Model) backfillTitles() tea.Cmd {
 	sessMgr := m.sessions
 	return func() tea.Msg {
-		sessMgr.BackfillIssueTitles()
-		return titlesBackfilledMsg{}
+		err := sessMgr.BackfillIssueTitles()
+		return titlesBackfilledMsg{err: err}
 	}
 }
 

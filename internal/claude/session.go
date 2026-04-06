@@ -239,11 +239,14 @@ func (m *Manager) RefreshStatuses() {
 
 // BackfillIssueTitles populates empty IssueTitle fields by looking up
 // linked issues via the GitHub API. Sessions whose titles are already
-// set or that have no branch are skipped.
-func (m *Manager) BackfillIssueTitles() {
+// set or that have no branch are skipped. At most maxBackfillPerRun
+// sessions are looked up per call to limit API usage.
+func (m *Manager) BackfillIssueTitles() error {
 	if m.gh == nil {
-		return
+		return nil
 	}
+
+	const maxBackfillPerRun = 10
 
 	m.mu.RLock()
 	type backfillEntry struct {
@@ -256,12 +259,15 @@ func (m *Manager) BackfillIssueTitles() {
 		s := &m.sessions[i]
 		if s.IssueTitle == "" && s.Branch != "" && s.Repo != "" {
 			entries = append(entries, backfillEntry{id: s.ID, repo: s.Repo, branch: s.Branch})
+			if len(entries) >= maxBackfillPerRun {
+				break
+			}
 		}
 	}
 	m.mu.RUnlock()
 
 	if len(entries) == 0 {
-		return
+		return nil
 	}
 
 	// Resolve titles outside the lock (makes network calls).
@@ -279,7 +285,7 @@ func (m *Manager) BackfillIssueTitles() {
 	}
 
 	if len(results) == 0 {
-		return
+		return nil
 	}
 
 	m.mu.Lock()
@@ -293,7 +299,10 @@ func (m *Manager) BackfillIssueTitles() {
 	}
 	m.mu.Unlock()
 
-	_ = m.saveState()
+	if err := m.saveState(); err != nil {
+		return fmt.Errorf("persist backfilled titles: %w", err)
+	}
+	return nil
 }
 
 // RemoveSession removes a session from tracking and optionally kills the process.

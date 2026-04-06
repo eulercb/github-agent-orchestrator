@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
@@ -325,9 +326,8 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	if maxTitle < 10 {
 		maxTitle = 10
 	}
-	issueTitleRunes := []rune(issueTitle)
-	if len(issueTitleRunes) > maxTitle {
-		issueTitle = string(issueTitleRunes[:maxTitle-3]) + "..."
+	if lipgloss.Width(issueTitle) > maxTitle {
+		issueTitle = ansi.Truncate(issueTitle, maxTitle-3, "...")
 	}
 
 	content := fmt.Sprintf("  %s %s  %s  %s", issueRef, statusStr, prStr, issueTitle)
