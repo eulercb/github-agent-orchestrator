@@ -66,17 +66,13 @@ func (r *RepoConfig) IssueRepoFullName() string {
 // Resolution order:
 //  1. repo.LocalPath (per-repo override)
 //  2. config.ReposDir/<repo.Name> (global repos root)
-//  3. config.Spawn.RepoDir (legacy single-repo setting)
-//  4. ~/<repo.Name> (fallback)
+//  3. ~/<repo.Name> (fallback)
 func (c *Config) RepoLocalDir(repo *RepoConfig) (string, error) {
 	if repo.LocalPath != "" {
 		return repo.LocalPath, nil
 	}
 	if c.ReposDir != "" {
 		return filepath.Join(c.ReposDir, repo.Name), nil
-	}
-	if c.Spawn.RepoDir != "" {
-		return c.Spawn.RepoDir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -101,7 +97,6 @@ type IssueFilters struct {
 type SpawnConfig struct {
 	Command     string `yaml:"command"`
 	UseWorktree bool   `yaml:"use_worktree"`
-	RepoDir     string `yaml:"repo_dir"`
 	BaseBranch  string `yaml:"base_branch"`
 }
 

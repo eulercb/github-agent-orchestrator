@@ -352,7 +352,7 @@ func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, e
 	worktrees := parseWorktreeList(out)
 
 	// Normalize worktreeBase so path comparisons are reliable even when
-	// spawn.repo_dir is relative or contains symlinks.
+	// repos_dir is relative or contains symlinks.
 	worktreeBase, err := filepath.Abs(filepath.Join(repoDir, ".worktrees"))
 	if err != nil {
 		return nil, fmt.Errorf("resolve worktree base: %w", err)

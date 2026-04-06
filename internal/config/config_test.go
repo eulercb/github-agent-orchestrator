@@ -88,10 +88,7 @@ func TestRepoLocalDir(t *testing.T) {
 	repo := &RepoConfig{Owner: "acme", Name: "app"}
 
 	t.Run("local_path wins", func(t *testing.T) {
-		cfg := Config{
-			ReposDir: "/repos",
-			Spawn:    SpawnConfig{RepoDir: "/legacy"},
-		}
+		cfg := Config{ReposDir: "/repos"}
 		repo := &RepoConfig{Owner: "acme", Name: "app", LocalPath: "/custom/app"}
 		dir, err := cfg.RepoLocalDir(repo)
 		require.NoError(t, err)
@@ -99,17 +96,10 @@ func TestRepoLocalDir(t *testing.T) {
 	})
 
 	t.Run("repos_dir fallback", func(t *testing.T) {
-		cfg := Config{ReposDir: "/repos", Spawn: SpawnConfig{RepoDir: "/legacy"}}
+		cfg := Config{ReposDir: "/repos"}
 		dir, err := cfg.RepoLocalDir(repo)
 		require.NoError(t, err)
 		assert.Equal(t, "/repos/app", dir)
-	})
-
-	t.Run("spawn.repo_dir legacy fallback", func(t *testing.T) {
-		cfg := Config{Spawn: SpawnConfig{RepoDir: "/legacy"}}
-		dir, err := cfg.RepoLocalDir(repo)
-		require.NoError(t, err)
-		assert.Equal(t, "/legacy", dir)
 	})
 
 	t.Run("home fallback", func(t *testing.T) {
