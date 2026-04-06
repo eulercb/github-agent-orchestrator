@@ -453,16 +453,6 @@ func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Sessio
 	// Build session name consistent with SpawnSession conventions.
 	sessionName := m.buildSessionName(repo, wt, issueNumber, issueRepo)
 
-	// Check if session already exists.
-	m.mu.RLock()
-	for i := range m.sessions {
-		if m.sessions[i].ID == sessionName {
-			m.mu.RUnlock()
-			return nil, fmt.Errorf("session %q already exists", sessionName)
-		}
-	}
-	m.mu.RUnlock()
-
 	sess := Session{
 		ID:           sessionName,
 		IssueNumber:  issueNumber,
@@ -474,7 +464,14 @@ func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Sessio
 		Status:       StatusStopped,
 	}
 
+	// Check-and-append under a single lock to avoid TOCTOU races.
 	m.mu.Lock()
+	for i := range m.sessions {
+		if m.sessions[i].ID == sessionName {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("session %q already exists", sessionName)
+		}
+	}
 	m.sessions = append(m.sessions, sess)
 	m.mu.Unlock()
 

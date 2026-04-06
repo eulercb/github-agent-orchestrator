@@ -506,11 +506,11 @@ func (m *Model) renderHelpBar() string {
 	var items []string
 	switch m.activePanel {
 	case PanelIssues:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "o open", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w import", "o open", "r refresh", "? help", "q quit"}
 	case PanelSessions:
 		items = []string{"↑↓ navigate", "tab switch", "a attach", "w import", "o open PR", "x kill", "r refresh", "? help", "q quit"}
 	case PanelPRs:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "w import", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
 	}
 	return styles.HelpBar.Width(m.width).Render(strings.Join(items, "  "))
 }

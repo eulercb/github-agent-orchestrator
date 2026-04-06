@@ -191,7 +191,7 @@ func (c *Client) ListPRs(repos []string, search string) ([]PullRequest, error) {
 	return allPRs, nil
 }
 
-// FindPRForIssue searches for an open PR in prRepo that closes the given issue.
+// FindPRForIssue searches for a PR in prRepo that references the given issue.
 // Uses GitHub search to find PRs that reference the issue number.
 func (c *Client) FindPRForIssue(prRepo, issueRepo string, issueNumber int) (*PullRequest, error) {
 	// GitHub's linked:issue search qualifier isn't available via gh, so we

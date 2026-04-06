@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -62,17 +63,38 @@ func (r *RepoConfig) IssueRepoFullName() string {
 	return owner + "/" + name
 }
 
+// expandTilde replaces a leading "~/" or bare "~" in a path with the user's
+// home directory. Go's filepath functions do not perform shell-style tilde
+// expansion, so this must be done explicitly.
+func expandTilde(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("determine user home directory: %w", err)
+		}
+		return filepath.Join(home, path[1:]), nil
+	}
+	return path, nil
+}
+
 // RepoLocalDir resolves the local filesystem path for a repository.
 // Resolution order:
 //  1. repo.LocalPath (per-repo override)
 //  2. config.ReposDir/<repo.Name> (global repos root)
 //  3. ~/<repo.Name> (fallback)
+//
+// Leading "~/" in LocalPath and ReposDir is expanded to the user's home
+// directory.
 func (c *Config) RepoLocalDir(repo *RepoConfig) (string, error) {
 	if repo.LocalPath != "" {
-		return repo.LocalPath, nil
+		return expandTilde(repo.LocalPath)
 	}
 	if c.ReposDir != "" {
-		return filepath.Join(c.ReposDir, repo.Name), nil
+		expanded, err := expandTilde(c.ReposDir)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(expanded, repo.Name), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -106,7 +106,36 @@ func TestRepoLocalDir(t *testing.T) {
 		cfg := Config{}
 		dir, err := cfg.RepoLocalDir(repo)
 		require.NoError(t, err)
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "app"), dir)
+	})
+
+	t.Run("tilde in repos_dir", func(t *testing.T) {
+		cfg := Config{ReposDir: "~/repos"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "repos", "app"), dir)
+	})
+
+	t.Run("tilde in local_path", func(t *testing.T) {
+		cfg := Config{}
+		repo := &RepoConfig{Owner: "acme", Name: "app", LocalPath: "~/custom/app"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(home, "custom", "app"), dir)
+	})
+
+	t.Run("bare tilde in repos_dir", func(t *testing.T) {
+		cfg := Config{ReposDir: "~"}
+		dir, err := cfg.RepoLocalDir(repo)
+		require.NoError(t, err)
+		home, err := os.UserHomeDir()
+		require.NoError(t, err)
 		assert.Equal(t, filepath.Join(home, "app"), dir)
 	})
 }
