@@ -99,6 +99,7 @@ func run() error {
 	}
 
 	ghClient := github.NewClient()
+	defer ghClient.Close()
 
 	sessMgr, err := claude.NewManager(&cfg, ghClient)
 	if err != nil {
