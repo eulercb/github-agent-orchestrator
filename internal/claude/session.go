@@ -525,6 +525,15 @@ func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber 
 		return 0, "", "", metaErr
 	}
 	if meta != nil && meta.IssueNumber > 0 {
+		// Backfill IssueTitle from GitHub when metadata was written by an
+		// older version that didn't persist the title.
+		if meta.IssueTitle == "" && m.gh != nil && wt.Branch != "" {
+			linked, ghErr := m.gh.FindLinkedIssue(r.FullName(), wt.Branch)
+			if ghErr == nil && linked != nil && linked.Title != "" {
+				meta.IssueTitle = linked.Title
+				_ = writeWorktreeMetadata(wt.Path, meta)
+			}
+		}
 		return meta.IssueNumber, meta.IssueRepo, meta.IssueTitle, nil
 	}
 

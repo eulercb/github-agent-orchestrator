@@ -371,13 +371,23 @@ func runGH(args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	out, err := cmd.Output()
 	if err != nil {
+		// Include up to the first 3 args for context (e.g. "pr list --repo")
+		// but avoid dumping full GraphQL queries or long flag values.
+		cmdHint := args[0]
+		if len(args) > 1 {
+			limit := 3
+			if len(args) < limit {
+				limit = len(args)
+			}
+			cmdHint = strings.Join(args[:limit], " ")
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr := strings.TrimSpace(string(exitErr.Stderr))
 			if stderr != "" {
-				return nil, fmt.Errorf("gh %s: %s: %w", args[0], stderr, err)
+				return nil, fmt.Errorf("gh %s: %s: %w", cmdHint, stderr, err)
 			}
 		}
-		return nil, fmt.Errorf("gh %s: %w", args[0], err)
+		return nil, fmt.Errorf("gh %s: %w", cmdHint, err)
 	}
 	return out, nil
 }

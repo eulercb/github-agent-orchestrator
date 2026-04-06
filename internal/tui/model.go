@@ -240,10 +240,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
-		// Merge into existing cache so transient failures don't wipe
-		// previously resolved PRs.
-		for k, v := range msg.prs {
-			m.prCache[k] = v
+		// Replace the cache with the latest refresh so stale entries
+		// (e.g. deleted PRs) are cleared.
+		m.prCache = msg.prs
+		if m.prCache == nil {
+			m.prCache = make(map[string]*github.PullRequest)
 		}
 		return m, filterCmd
 	case statusRefreshMsg:
@@ -380,6 +381,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
+		if m.scanning {
+			return m, nil
+		}
 		m.scanning = true
 		cmd := m.syncWorktrees()
 		return m, cmd
