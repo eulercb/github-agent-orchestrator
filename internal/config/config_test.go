@@ -15,7 +15,8 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "claude --dangerously-skip-permissions", cfg.Spawn.Command)
 	assert.True(t, cfg.Spawn.UseWorktree, "expected worktree to be enabled by default")
 	assert.False(t, cfg.CCUsage.Enabled, "expected ccusage to be disabled by default")
-	assert.Empty(t, cfg.Repos)
+	assert.Equal(t, DefaultIssueFilter, cfg.IssueFilter)
+	assert.Equal(t, DefaultPRFilter, cfg.PRFilter)
 }
 
 func TestLoadMissingConfig(t *testing.T) {
@@ -32,15 +33,9 @@ func TestSaveAndLoad(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 
 	cfg := DefaultConfig()
-	cfg.Repos = []RepoConfig{
-		{
-			Owner: "testowner",
-			Name:  "testrepo",
-			Filters: IssueFilters{
-				Search: "is:open assignee:@me repo:testowner/testrepo",
-			},
-		},
-	}
+	cfg.ReposDir = "/tmp/repos"
+	cfg.IssueFilter = "is:open assignee:@me repo:testowner/testrepo"
+	cfg.PRFilter = "is:open author:@me"
 
 	require.NoError(t, Save(&cfg))
 
@@ -52,122 +47,40 @@ func TestSaveAndLoad(t *testing.T) {
 	// Load it back
 	loaded, err := Load()
 	require.NoError(t, err)
-	require.Len(t, loaded.Repos, 1)
-	assert.Equal(t, "testowner/testrepo", loaded.Repos[0].FullName())
-	assert.Equal(t, "is:open assignee:@me repo:testowner/testrepo", loaded.Repos[0].Filters.Search)
+	assert.Equal(t, "/tmp/repos", loaded.ReposDir)
+	assert.Equal(t, "is:open assignee:@me repo:testowner/testrepo", loaded.IssueFilter)
+	assert.Equal(t, "is:open author:@me", loaded.PRFilter)
 }
 
-func TestRepoFullName(t *testing.T) {
-	r := RepoConfig{Owner: "foo", Name: "bar"}
-	assert.Equal(t, "foo/bar", r.FullName())
-}
-
-func TestIssueRepoFullName(t *testing.T) {
-	// Without IssueSource, falls back to main repo
-	r := RepoConfig{Owner: "foo", Name: "bar"}
-	assert.Equal(t, "foo/bar", r.IssueRepoFullName())
-
-	// With IssueSource, returns the issue source repo
-	r.IssueSource = &IssueSource{Owner: "org", Name: "issues"}
-	assert.Equal(t, "org/issues", r.IssueRepoFullName())
-
-	// With empty IssueSource fields, falls back to main repo
-	r.IssueSource = &IssueSource{Owner: "", Name: ""}
-	assert.Equal(t, "foo/bar", r.IssueRepoFullName())
-
-	// Partial IssueSource: only Name set, Owner inherited from main repo
-	r.IssueSource = &IssueSource{Owner: "", Name: "other-repo"}
-	assert.Equal(t, "foo/other-repo", r.IssueRepoFullName())
-
-	// Partial IssueSource: only Owner set, Name inherited from main repo
-	r.IssueSource = &IssueSource{Owner: "other-org", Name: ""}
-	assert.Equal(t, "other-org/bar", r.IssueRepoFullName())
-}
-
-func TestRepoLocalDir(t *testing.T) {
-	repo := &RepoConfig{Owner: "acme", Name: "app"}
-
-	t.Run("local_path wins", func(t *testing.T) {
+func TestExpandReposDir(t *testing.T) {
+	t.Run("absolute path", func(t *testing.T) {
 		cfg := Config{ReposDir: "/repos"}
-		repo := &RepoConfig{Owner: "acme", Name: "app", LocalPath: "/custom/app"}
-		dir, err := cfg.RepoLocalDir(repo)
+		dir, err := cfg.ExpandReposDir()
 		require.NoError(t, err)
-		assert.Equal(t, "/custom/app", dir)
+		assert.Equal(t, "/repos", dir)
 	})
 
-	t.Run("repos_dir fallback", func(t *testing.T) {
-		cfg := Config{ReposDir: "/repos"}
-		dir, err := cfg.RepoLocalDir(repo)
-		require.NoError(t, err)
-		assert.Equal(t, "/repos/app", dir)
-	})
-
-	t.Run("home fallback", func(t *testing.T) {
-		cfg := Config{}
-		dir, err := cfg.RepoLocalDir(repo)
-		require.NoError(t, err)
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(home, "app"), dir)
-	})
-
-	t.Run("tilde in repos_dir", func(t *testing.T) {
+	t.Run("tilde expansion", func(t *testing.T) {
 		cfg := Config{ReposDir: "~/repos"}
-		dir, err := cfg.RepoLocalDir(repo)
+		dir, err := cfg.ExpandReposDir()
 		require.NoError(t, err)
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(home, "repos", "app"), dir)
+		assert.Equal(t, filepath.Join(home, "repos"), dir)
 	})
 
-	t.Run("tilde in local_path", func(t *testing.T) {
-		cfg := Config{}
-		repo := &RepoConfig{Owner: "acme", Name: "app", LocalPath: "~/custom/app"}
-		dir, err := cfg.RepoLocalDir(repo)
-		require.NoError(t, err)
-		home, err := os.UserHomeDir()
-		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(home, "custom", "app"), dir)
-	})
-
-	t.Run("bare tilde in repos_dir", func(t *testing.T) {
+	t.Run("bare tilde", func(t *testing.T) {
 		cfg := Config{ReposDir: "~"}
-		dir, err := cfg.RepoLocalDir(repo)
+		dir, err := cfg.ExpandReposDir()
 		require.NoError(t, err)
 		home, err := os.UserHomeDir()
 		require.NoError(t, err)
-		assert.Equal(t, filepath.Join(home, "app"), dir)
+		assert.Equal(t, home, dir)
 	})
-}
 
-func TestSaveAndLoadWithIssueSource(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-
-	cfg := DefaultConfig()
-	cfg.Repos = []RepoConfig{
-		{
-			Owner: "myorg",
-			Name:  "myapp",
-			IssueSource: &IssueSource{
-				Owner: "myorg",
-				Name:  "project-issues",
-			},
-			Filters: IssueFilters{
-				Search: "is:open repo:myorg/project-issues",
-			},
-		},
-	}
-
-	require.NoError(t, Save(&cfg))
-
-	loaded, err := Load()
-	require.NoError(t, err)
-	require.Len(t, loaded.Repos, 1)
-
-	repo := &loaded.Repos[0]
-	assert.Equal(t, "myorg/myapp", repo.FullName())
-	require.NotNil(t, repo.IssueSource)
-	assert.Equal(t, "myorg/project-issues", repo.IssueRepoFullName())
-	assert.Equal(t, "is:open repo:myorg/project-issues", repo.Filters.Search)
+	t.Run("empty repos_dir", func(t *testing.T) {
+		cfg := Config{}
+		_, err := cfg.ExpandReposDir()
+		assert.Error(t, err)
+	})
 }

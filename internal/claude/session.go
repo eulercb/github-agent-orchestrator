@@ -16,6 +16,7 @@ import (
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/process"
+	"github.com/eulercb/github-agent-orchestrator/internal/repo"
 )
 
 // Status represents the current state of a Claude Code session.
@@ -49,7 +50,7 @@ type Session struct {
 }
 
 // IssueRepoName returns the repo the issue was fetched from.
-// Falls back to Repo for backward compatibility with older sessions.
+// Falls back to Repo when IssueRepo is empty.
 func (s *Session) IssueRepoName() string {
 	if s.IssueRepo != "" {
 		return s.IssueRepo
@@ -96,17 +97,16 @@ func (m *Manager) Sessions() []Session {
 }
 
 // SpawnSession creates a new Claude Code session for an issue.
-func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTitle string) (*Session, error) {
+// The r parameter identifies the target repo for the session.
+// issueRepo is the "owner/name" of the repo the issue belongs to.
+func (m *Manager) SpawnSession(r *repo.Repo, issueRepo string, issueNumber int, issueTitle string) (*Session, error) {
 	var sessionName, branch string
-	if repo.IssueSource != nil && repo.IssueRepoFullName() != repo.FullName() {
-		// Include the effective issue source repo identifier to avoid collisions
-		// when issues come from a different repo than where PRs are opened,
-		// including configurations where IssueSource overrides only the owner.
-		issueRepoID := strings.ReplaceAll(repo.IssueRepoFullName(), "/", "-")
-		sessionName = fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, issueRepoID, issueNumber)
+	if issueRepo != "" && issueRepo != r.FullName() {
+		issueRepoID := strings.ReplaceAll(issueRepo, "/", "-")
+		sessionName = fmt.Sprintf("gao-%s-%s-%s-%d", r.Owner, r.Name, issueRepoID, issueNumber)
 		branch = fmt.Sprintf("claude/issue-%s-%d", issueRepoID, issueNumber)
 	} else {
-		sessionName = fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
+		sessionName = fmt.Sprintf("gao-%s-%s-%d", r.Owner, r.Name, issueNumber)
 		branch = fmt.Sprintf("claude/issue-%d", issueNumber)
 	}
 
@@ -120,10 +120,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	}
 	m.mu.RUnlock()
 
-	repoDir, err := m.cfg.RepoLocalDir(repo)
-	if err != nil {
-		return nil, err
-	}
+	repoDir := r.LocalPath
 
 	// Set up git worktree or branch
 	var workDir string
@@ -142,8 +139,6 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 
 	// Persist issue metadata inside the worktree so that future imports
 	// can associate the worktree with the issue without relying on branch names.
-	// Only relevant in worktree mode — SyncWorktrees discovers these.
-	issueRepo := repo.IssueRepoFullName()
 	if m.cfg.Spawn.UseWorktree {
 		if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
 			IssueNumber: issueNumber,
@@ -176,7 +171,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 		ID:           sessionName,
 		IssueNumber:  issueNumber,
 		IssueTitle:   issueTitle,
-		Repo:         repo.FullName(),
+		Repo:         r.FullName(),
 		IssueRepo:    issueRepo,
 		Branch:       branch,
 		PID:          pid,
@@ -268,8 +263,6 @@ func (m *Manager) RemoveSession(id string, killProcess bool) error {
 }
 
 // FindByIssue finds a session for a specific issue.
-// The issueRepo parameter is matched against the session's issue repo
-// (falling back to Repo for backward compatibility with older sessions).
 func (m *Manager) FindByIssue(issueRepo string, issueNumber int) *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -341,42 +334,33 @@ type SyncResult struct {
 	Removed int
 }
 
-// SyncWorktrees discovers worktrees across all configured repos, registers
+// SyncWorktrees discovers worktrees across all repos in repos_dir, registers
 // new ones as sessions, and removes sessions whose worktree no longer exists.
-//
-// For each new worktree the issue association is resolved via:
-//  1. .claude/gao.local.yaml metadata file (instant, written by SpawnSession).
-//  2. GitHub GraphQL for the PR's linked issue references.
-//  3. Fall back to unassociated (issue number 0).
-//
-// Sessions whose repo could not be scanned (bad path, git error) are left
-// untouched — only repos that were successfully listed participate in the
-// removal of stale sessions.
 func (m *Manager) SyncWorktrees() (*SyncResult, error) {
+	repos, err := m.discoverRepos()
+	if err != nil {
+		return nil, err
+	}
+
 	type repoWorktree struct {
-		repo *config.RepoConfig
-		wt   Worktree
+		r  *repo.Repo
+		wt Worktree
 	}
 
 	var discovered []repoWorktree
 	scannedRepos := make(map[string]bool)
 
-	for i := range m.cfg.Repos {
-		repo := &m.cfg.Repos[i]
-		repoDir, err := m.cfg.RepoLocalDir(repo)
-		if err != nil {
+	for i := range repos {
+		r := &repos[i]
+		out, gitErr := gitRun(r.LocalPath, "worktree", "list", "--porcelain")
+		if gitErr != nil {
 			continue
 		}
 
-		out, err := gitRun(repoDir, "worktree", "list", "--porcelain")
-		if err != nil {
-			continue
-		}
-
-		scannedRepos[repo.FullName()] = true
+		scannedRepos[r.FullName()] = true
 		worktrees := parseWorktreeList(out)
 
-		repoDirAbs, absErr := filepath.Abs(repoDir)
+		repoDirAbs, absErr := filepath.Abs(r.LocalPath)
 		if absErr != nil {
 			continue
 		}
@@ -390,7 +374,7 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 			if wtAbs == repoDirAbs {
 				continue
 			}
-			discovered = append(discovered, repoWorktree{repo: repo, wt: wt})
+			discovered = append(discovered, repoWorktree{r: r, wt: wt})
 		}
 	}
 
@@ -416,8 +400,8 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 
 	var newEntries []repoWorktree
 	for _, d := range discovered {
-		abs, err := filepath.Abs(d.wt.Path)
-		if err != nil {
+		abs, absErr := filepath.Abs(d.wt.Path)
+		if absErr != nil {
 			continue
 		}
 		if !trackedPaths[abs] {
@@ -428,17 +412,15 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 	// Resolve issues for new worktrees outside the lock (may call GitHub API).
 	var newSessions []Session
 	for _, d := range newEntries {
-		issueNumber, issueRepo, resolveErr := m.resolveWorktreeIssue(d.repo, &d.wt)
+		issueNumber, issueRepo, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
 		if resolveErr != nil {
-			// Skip worktrees with corrupted/unreadable metadata rather
-			// than importing them as unassociated.
 			continue
 		}
-		name := buildSessionName(d.repo, &d.wt, issueNumber, issueRepo)
+		name := buildSessionName(d.r, &d.wt, issueNumber, issueRepo)
 		newSessions = append(newSessions, Session{
 			ID:           name,
 			IssueNumber:  issueNumber,
-			Repo:         d.repo.FullName(),
+			Repo:         d.r.FullName(),
 			IssueRepo:    issueRepo,
 			Branch:       d.wt.Branch,
 			WorktreePath: d.wt.Path,
@@ -459,8 +441,8 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 			kept = append(kept, *s)
 			continue
 		}
-		abs, err := filepath.Abs(s.WorktreePath)
-		if err != nil || discoveredPaths[abs] {
+		abs, absErr := filepath.Abs(s.WorktreePath)
+		if absErr != nil || discoveredPaths[abs] {
 			kept = append(kept, *s)
 			continue
 		}
@@ -492,6 +474,20 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 	return &SyncResult{Added: added, Removed: removed}, nil
 }
 
+// discoverRepos returns the list of repos found under repos_dir.
+func (m *Manager) discoverRepos() ([]repo.Repo, error) {
+	reposDir, err := m.cfg.ExpandReposDir()
+	if err != nil {
+		return nil, err
+	}
+	return repo.Discover(reposDir)
+}
+
+// DiscoverRepos exposes repo discovery for use by the TUI.
+func (m *Manager) DiscoverRepos() ([]repo.Repo, error) {
+	return m.discoverRepos()
+}
+
 // parseWorktreeList parses the porcelain output of `git worktree list --porcelain`.
 func parseWorktreeList(output string) []Worktree {
 	var worktrees []Worktree
@@ -520,9 +516,7 @@ func parseWorktreeList(output string) []Worktree {
 }
 
 // resolveWorktreeIssue determines the issue number and repo for a worktree.
-// It tries the local metadata file first, then GitHub GraphQL, persisting
-// the result on success.
-func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (issueNumber int, issueRepo string, err error) {
+func (m *Manager) resolveWorktreeIssue(r *repo.Repo, wt *Worktree) (issueNumber int, issueRepo string, err error) {
 	meta, metaErr := readWorktreeMetadata(wt.Path)
 	if metaErr != nil {
 		return 0, "", metaErr
@@ -532,7 +526,7 @@ func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (i
 	}
 
 	if m.gh != nil && wt.Branch != "" {
-		linked, ghErr := m.gh.FindLinkedIssue(repo.FullName(), wt.Branch)
+		linked, ghErr := m.gh.FindLinkedIssue(r.FullName(), wt.Branch)
 		if ghErr == nil && linked != nil {
 			issueRepo = linked.Repository
 			_ = writeWorktreeMetadata(wt.Path, &worktreeMetadata{
@@ -547,19 +541,19 @@ func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (i
 }
 
 // buildSessionName generates a human-readable session ID.
-func buildSessionName(repo *config.RepoConfig, wt *Worktree, issueNumber int, issueRepo string) string {
+func buildSessionName(r *repo.Repo, wt *Worktree, issueNumber int, issueRepo string) string {
 	switch {
-	case issueNumber > 0 && issueRepo != "" && issueRepo != repo.FullName():
+	case issueNumber > 0 && issueRepo != "" && issueRepo != r.FullName():
 		issueRepoID := strings.ReplaceAll(issueRepo, "/", "-")
-		return fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, issueRepoID, issueNumber)
+		return fmt.Sprintf("gao-%s-%s-%s-%d", r.Owner, r.Name, issueRepoID, issueNumber)
 	case issueNumber > 0:
-		return fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
+		return fmt.Sprintf("gao-%s-%s-%d", r.Owner, r.Name, issueNumber)
 	default:
 		safe := strings.NewReplacer("/", "-", ".", "-").Replace(wt.Branch)
 		if safe == "" {
 			safe = filepath.Base(wt.Path)
 		}
-		return fmt.Sprintf("gao-%s-%s-%s", repo.Owner, repo.Name, safe)
+		return fmt.Sprintf("gao-%s-%s-%s", r.Owner, r.Name, safe)
 	}
 }
 

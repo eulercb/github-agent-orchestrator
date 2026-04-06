@@ -4,11 +4,8 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -53,7 +50,7 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	if len(cfg.Repos) == 0 {
+	if cfg.ReposDir == "" {
 		cfgPath, pathErr := config.Path()
 		if pathErr != nil {
 			return fmt.Errorf("config path: %w", pathErr)
@@ -88,13 +85,11 @@ func run() error {
 			fmt.Printf("\nConfig created at %s\n", cfgPath)
 		}
 
-		if len(cfg.Repos) == 0 {
-			fmt.Printf("No repos configured. Add a repo to %s:\n\n", cfgPath)
-			fmt.Println("repos:")
-			fmt.Println("  - owner: your-github-username")
-			fmt.Println("    name: your-repo-name")
-			fmt.Println("    filters:")
-			fmt.Println("      search: 'is:open assignee:@me repo:org/repo'")
+		if cfg.ReposDir == "" {
+			fmt.Printf("No repos_dir configured. Add it to %s:\n\n", cfgPath)
+			fmt.Println("repos_dir: ~/code")
+			fmt.Println("issue_filter: 'is:open assignee:@me'")
+			fmt.Println("pr_filter: 'is:open author:@me'")
 			fmt.Println()
 			return nil
 		}
@@ -141,18 +136,7 @@ func runInit() {
 	}
 
 	fmt.Printf("\nConfig created at %s\n", cfgPath)
-
-	cfg, loadErr := config.Load()
-	if loadErr != nil {
-		fmt.Fprintf(os.Stderr, "gao: failed to read config after init: %v\n", loadErr)
-		os.Exit(1)
-	}
-
-	if len(cfg.Repos) > 0 {
-		fmt.Println("Run 'gao' to start the dashboard.")
-	} else {
-		fmt.Println("Add a repo to the config, then run 'gao' to start.")
-	}
+	fmt.Println("Run 'gao' to start the dashboard.")
 }
 
 // doInit runs the interactive config setup and saves the result.
@@ -160,34 +144,15 @@ func doInit() error {
 	scanner := bufio.NewScanner(os.Stdin)
 	cfg := config.DefaultConfig()
 
-	// Try to detect the current repo from git remote.
-	detectedOwner, detectedName := detectGitRepo()
-
-	owner := prompt(scanner, "Repository owner", detectedOwner)
-	name := prompt(scanner, "Repository name", detectedName)
-
-	if owner != "" && name != "" {
-		search := prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultSearch)
-
-		// Detect the parent of the current directory as default repos root.
-		var detectedReposDir string
-		if cwd, err := os.Getwd(); err == nil {
-			detectedReposDir = filepath.Dir(cwd)
-		}
-
-		reposDir := prompt(scanner, "Root directory for repos", detectedReposDir)
-		cfg.ReposDir = reposDir
-
-		repo := config.RepoConfig{
-			Owner: owner,
-			Name:  name,
-			Filters: config.IssueFilters{
-				Search: search,
-			},
-		}
-
-		cfg.Repos = []config.RepoConfig{repo}
+	// Default repos_dir to the current working directory.
+	var detectedReposDir string
+	if cwd, err := os.Getwd(); err == nil {
+		detectedReposDir = cwd
 	}
+
+	cfg.ReposDir = prompt(scanner, "Root directory for repos (git repos will be auto-discovered)", detectedReposDir)
+	cfg.IssueFilter = prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultIssueFilter)
+	cfg.PRFilter = prompt(scanner, "PR filter (GitHub search syntax)", config.DefaultPRFilter)
 
 	if err := config.Save(&cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -212,21 +177,6 @@ func prompt(scanner *bufio.Scanner, label, defaultVal string) string {
 	return defaultVal
 }
 
-// detectGitRepo tries to detect the GitHub owner/name from the current
-// directory's git remote.
-func detectGitRepo() (owner, name string) {
-	cmd := exec.CommandContext(context.Background(), "gh", "repo", "view", "--json", "owner,name", "-q", ".owner.login + \"/\" + .name")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", ""
-	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "/", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return "", ""
-}
-
 func printUsage() {
 	fmt.Printf(`gao - GitHub Agent Orchestrator v%s
 
@@ -240,8 +190,8 @@ Config: ~/.config/gao/config.yaml
 
 Dashboard controls:
   ↑↓/jk           Navigate
-  Tab              Switch panels (Issues ↔ Sessions)
-  /                Edit issue filter (GitHub search syntax)
+  Tab              Switch panels (Issues ↔ Sessions ↔ PRs)
+  /                Edit issue/PR filter (GitHub search syntax)
   s                Spawn Claude Code session for selected issue
   a                Attach to selected session
   o                Open issue/PR in browser

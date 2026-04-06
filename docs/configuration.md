@@ -8,30 +8,19 @@ gao is configured via a YAML file at `~/.config/gao/config.yaml`. Run `gao init`
 # gao - GitHub Agent Orchestrator configuration
 # https://github.com/eulercb/github-agent-orchestrator
 
-# Repositories to track. The TUI currently loads issues from the first entry.
-repos:
-  - owner: eulercb
-    name: my-project
-    # Override the local clone path for this specific repo.
-    # If unset, falls back to repos_dir/<name>, then ~/<name>.
-    local_path: "/home/you/work/my-project"
-    filters:
-      assignee: "@me"          # GitHub username or "@me"
-      labels:                  # Only show issues with ALL of these labels
-        - bug
-        - priority/high
-      state: open              # "open", "closed", or "all"
+# Root directory containing your git repos. gao auto-discovers all
+# git repositories (immediate subdirectories) and extracts their
+# GitHub owner/name from the origin remote URL.
+# Required.
+repos_dir: "~/code"
 
-  - owner: eulercb
-    name: another-repo
-    filters:
-      assignee: "@me"
-      state: open
-
-# Root directory where repos are cloned. Used as <repos_dir>/<name>
-# when a repo doesn't have an explicit local_path.
-# Default: "" (falls back to ~/<name>)
-repos_dir: ""
+# GitHub search syntax filters for the Issues and PRs panels.
+# These are global — issue/PR results come from GitHub search, not
+# scoped to a single repo. Use repo: qualifiers to narrow scope.
+# Default issue_filter: "is:open assignee:@me"
+# Default pr_filter: "is:open author:@me"
+issue_filter: "is:open assignee:@me"
+pr_filter: "is:open author:@me"
 
 # How Claude Code sessions are spawned.
 spawn:
@@ -82,18 +71,19 @@ session_dir: ""
 
 ## Minimal config
 
-If you just want to get started with a single repo:
+Just point gao at your repos directory:
 
 ```yaml
-repos:
-  - owner: your-username
-    name: your-repo
-    filters:
-      assignee: "@me"
-      state: open
+repos_dir: ~/code
 ```
 
-Everything else uses sensible defaults.
+Everything else uses sensible defaults. gao will auto-discover all git repos under `~/code` that have a GitHub origin remote.
+
+## How repo discovery works
+
+On startup (and on every worktree scan), gao reads all immediate subdirectories of `repos_dir` and checks each for a `.git` directory. For each git repo found, it parses the `origin` remote URL to extract the GitHub owner and name. Both SSH (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name`) formats are supported.
+
+Non-git directories and repos without a GitHub remote are silently skipped.
 
 ## File locations
 
