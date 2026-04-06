@@ -46,7 +46,7 @@ type WorktreeConfig struct {
 	// When empty, gao auto-detects:
 	//   tmux (if $TMUX is set)  → tmux new-window -c {path}
 	//   Warp (if $TERM_PROGRAM) → open -a Warp {path}
-	//   fallback                → cd into path interactively
+	//   fallback                → login shell in the worktree path (suspends TUI)
 	// Example: "kitty --directory {path}"
 	OpenCommand string `yaml:"open_command"`
 }

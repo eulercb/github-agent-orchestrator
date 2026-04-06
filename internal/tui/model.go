@@ -889,8 +889,9 @@ func (m *Model) openWorktreeWarp(sessID, workDir string) tea.Cmd {
 func (m *Model) openWorktreeCommand(sessID, workDir, tpl string) tea.Cmd {
 	dbg := m.debugLog
 	if !strings.Contains(tpl, "{path}") {
-		dbg.Info("worktree open_command is missing '{path}' placeholder")
-		return nil
+		return func() tea.Msg {
+			return errMsg{err: fmt.Errorf("worktree open_command is missing '{path}' placeholder")}
+		}
 	}
 	fullCmd := strings.ReplaceAll(tpl, "{path}", shellQuoteSession(workDir))
 	return func() tea.Msg {

@@ -49,7 +49,7 @@ worktree:
   # When empty, gao auto-detects:
   #   tmux ($TMUX set)          → tmux new-window -c {path}
   #   Warp ($TERM_PROGRAM)      → open -a Warp {path}
-  #   fallback                  → opens a login shell (suspends TUI)
+  #   fallback                  → login shell in the worktree path (suspends TUI)
   # Examples:
   #   "kitty --directory {path}"
   #   "alacritty --working-directory {path}"
