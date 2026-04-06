@@ -424,9 +424,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) toggleIssues() (tea.Model, tea.Cmd) {
 	if m.showIssues {
 		// Hide issues
-		m.showIssues = false
 		m.cfg.TrackIssues = false
-		_ = config.Save(m.cfg)
+		if err := config.Save(m.cfg); err != nil {
+			m.cfg.TrackIssues = true
+			m.errorMsg = fmt.Sprintf("Save config: %v", err)
+			return m, nil
+		}
+		m.showIssues = false
 		if m.activePanel == PanelIssues {
 			m.activePanel = PanelSessions
 		}
@@ -434,9 +438,13 @@ func (m *Model) toggleIssues() (tea.Model, tea.Cmd) {
 	}
 
 	// Show issues
-	m.showIssues = true
 	m.cfg.TrackIssues = true
-	_ = config.Save(m.cfg)
+	if err := config.Save(m.cfg); err != nil {
+		m.cfg.TrackIssues = false
+		m.errorMsg = fmt.Sprintf("Save config: %v", err)
+		return m, nil
+	}
+	m.showIssues = true
 
 	if !m.issuesInitialized {
 		// First time: open filter editor so user can configure the query
@@ -472,12 +480,16 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Blur()
 			query := strings.TrimSpace(m.filterInput.Value())
 			m.loading = true
-			m.issueFilter = query
-			m.issuesCursor = 0
 			m.filterForToggle = false
 			// Persist the filter to config
+			prevFilter := m.cfg.IssueFilter
 			m.cfg.IssueFilter = query
-			_ = config.Save(m.cfg)
+			if err := config.Save(m.cfg); err != nil {
+				m.cfg.IssueFilter = prevFilter
+				m.errorMsg = fmt.Sprintf("Save config: %v", err)
+			}
+			m.issueFilter = query
+			m.issuesCursor = 0
 			cmd := m.fetchIssues()
 			return m, cmd
 		case tea.KeyEsc:
@@ -489,9 +501,12 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// revert the toggle.
 			if m.filterForToggle {
 				m.filterForToggle = false
-				m.showIssues = false
 				m.cfg.TrackIssues = false
-				_ = config.Save(m.cfg)
+				if err := config.Save(m.cfg); err != nil {
+					m.cfg.TrackIssues = true
+					m.errorMsg = fmt.Sprintf("Save config: %v", err)
+				}
+				m.showIssues = false
 				m.activePanel = PanelSessions
 			}
 			return m, nil

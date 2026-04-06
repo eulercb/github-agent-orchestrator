@@ -180,19 +180,29 @@ func prompt(scanner *bufio.Scanner, label, defaultVal string) string {
 }
 
 // promptYesNo asks the user a yes/no question with a default value.
+// Re-prompts on invalid input until a valid answer is given.
 func promptYesNo(scanner *bufio.Scanner, label string, defaultVal bool) bool {
 	defStr := "Y/n"
 	if !defaultVal {
 		defStr = "y/N"
 	}
-	fmt.Printf("%s [%s]: ", label, defStr)
-	if scanner.Scan() {
+	for {
+		fmt.Printf("%s [%s]: ", label, defStr)
+		if !scanner.Scan() {
+			return defaultVal
+		}
 		input := strings.TrimSpace(strings.ToLower(scanner.Text()))
-		if input != "" {
-			return input == "y" || input == "yes"
+		switch input {
+		case "":
+			return defaultVal
+		case "y", "yes":
+			return true
+		case "n", "no":
+			return false
+		default:
+			fmt.Println("Please enter yes or no.")
 		}
 	}
-	return defaultVal
 }
 
 func printUsage() {
