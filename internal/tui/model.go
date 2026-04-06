@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -662,28 +663,55 @@ func (m *Model) fetchPRs() tea.Cmd {
 	dbg := m.debugLog
 	return func() tea.Msg {
 		sessions := m.sessions.Sessions()
-		count := 0
+
+		// Collect sessions that need PR lookups.
+		type lookup struct {
+			repoName string
+			branch   string
+		}
+		var lookups []lookup
 		for i := range sessions {
 			if sessions[i].Branch != "" {
-				count++
+				lookups = append(lookups, lookup{
+					repoName: sessions[i].Repo,
+					branch:   sessions[i].Branch,
+				})
 			}
 		}
-		id := dbg.Start(fmt.Sprintf("Fetching PRs for %d sessions", count))
-		prs := make(map[string]*github.PullRequest)
+		id := dbg.Start(fmt.Sprintf("Fetching PRs for %d sessions", len(lookups)))
+
+		// Look up PRs concurrently.
+		type prResult struct {
+			key string
+			pr  *github.PullRequest
+			err error
+		}
+		results := make([]prResult, len(lookups))
+		var wg sync.WaitGroup
+		wg.Add(len(lookups))
+		for i, l := range lookups {
+			go func(idx int, repoName, branch string) {
+				defer wg.Done()
+				pr, err := m.gh.FindPRForBranch(repoName, branch)
+				results[idx] = prResult{
+					key: prCacheKey(repoName, branch),
+					pr:  pr,
+					err: err,
+				}
+			}(i, l.repoName, l.branch)
+		}
+		wg.Wait()
+
+		prs := make(map[string]*github.PullRequest, len(lookups))
 		var firstErr error
-		for i := range sessions {
-			s := &sessions[i]
-			if s.Branch == "" {
-				continue
-			}
-			pr, err := m.gh.FindPRForBranch(s.Repo, s.Branch)
-			if err != nil {
+		for _, r := range results {
+			if r.err != nil {
 				if firstErr == nil {
-					firstErr = fmt.Errorf("%s@%s: %w", s.Repo, s.Branch, err)
+					firstErr = r.err
 				}
 				continue
 			}
-			prs[prCacheKey(s.Repo, s.Branch)] = pr
+			prs[r.key] = r.pr
 		}
 		found := 0
 		for _, pr := range prs {

@@ -206,32 +206,73 @@ func (m *Manager) SpawnSession(r *repo.Repo, issueRepo string, issueNumber int, 
 }
 
 // RefreshStatuses updates the status of all sessions by checking processes.
+// File IO for log reading is performed concurrently outside the write lock.
 func (m *Manager) RefreshStatuses() {
+	// Snapshot session metadata under a read lock.
+	m.mu.RLock()
+	type sessionInfo struct {
+		idx     int
+		pid     int
+		status  Status
+		logFile string
+	}
+	infos := make([]sessionInfo, len(m.sessions))
+	for i := range m.sessions {
+		infos[i] = sessionInfo{
+			idx:     i,
+			pid:     m.sessions[i].PID,
+			status:  m.sessions[i].Status,
+			logFile: m.sessions[i].LogFile,
+		}
+	}
+	m.mu.RUnlock()
+
+	// Compute new statuses and read log files concurrently (no lock held).
+	type statusUpdate struct {
+		newStatus    Status
+		lastActivity string
+	}
+	updates := make([]statusUpdate, len(infos))
+	var wg sync.WaitGroup
+	wg.Add(len(infos))
+	for i, info := range infos {
+		go func(idx int, info sessionInfo) {
+			defer wg.Done()
+			if !process.IsRunning(info.pid) {
+				switch {
+				case info.status == StatusRunning || info.status == StatusWaiting:
+					updates[idx] = statusUpdate{newStatus: StatusDone}
+				case info.status != StatusDone:
+					updates[idx] = statusUpdate{newStatus: StatusStopped}
+				default:
+					updates[idx] = statusUpdate{newStatus: info.status}
+				}
+				return
+			}
+
+			upd := statusUpdate{newStatus: StatusRunning}
+			if info.logFile != "" {
+				output, err := process.ReadLastLines(info.logFile, 5)
+				if err == nil && output != "" {
+					upd.lastActivity = extractLastActivity(output)
+					if isWaitingForInput(output) {
+						upd.newStatus = StatusWaiting
+					}
+				}
+			}
+			updates[idx] = upd
+		}(i, info)
+	}
+	wg.Wait()
+
+	// Apply updates under a write lock.
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	for i := range m.sessions {
-		s := &m.sessions[i]
-
-		if !process.IsRunning(s.PID) {
-			if s.Status == StatusRunning || s.Status == StatusWaiting {
-				s.Status = StatusDone
-			} else if s.Status != StatusDone {
-				s.Status = StatusStopped
-			}
-			continue
-		}
-
-		s.Status = StatusRunning
-
-		// Try to detect waiting state from log output
-		if s.LogFile != "" {
-			output, err := process.ReadLastLines(s.LogFile, 5)
-			if err == nil && output != "" {
-				s.LastActivity = extractLastActivity(output)
-				if isWaitingForInput(output) {
-					s.Status = StatusWaiting
-				}
+	for i, upd := range updates {
+		if i < len(m.sessions) {
+			m.sessions[i].Status = upd.newStatus
+			if upd.lastActivity != "" {
+				m.sessions[i].LastActivity = upd.lastActivity
 			}
 		}
 	}
@@ -270,18 +311,31 @@ func (m *Manager) BackfillIssueTitles() error {
 		return nil
 	}
 
-	// Resolve titles outside the lock (makes network calls).
+	// Resolve titles concurrently outside the lock (network calls).
 	type resolved struct {
 		id    string
 		title string
 	}
+	resolvedResults := make([]resolved, len(entries))
+	var wg sync.WaitGroup
+	wg.Add(len(entries))
+	for i, e := range entries {
+		go func(idx int, id, repoName, branch string) {
+			defer wg.Done()
+			linked, err := m.gh.FindLinkedIssue(repoName, branch)
+			if err != nil || linked == nil || linked.Title == "" {
+				return
+			}
+			resolvedResults[idx] = resolved{id: id, title: linked.Title}
+		}(i, e.id, e.repo, e.branch)
+	}
+	wg.Wait()
+
 	var results []resolved
-	for _, e := range entries {
-		linked, err := m.gh.FindLinkedIssue(e.repo, e.branch)
-		if err != nil || linked == nil || linked.Title == "" {
-			continue
+	for _, r := range resolvedResults {
+		if r.title != "" {
+			results = append(results, r)
 		}
-		results = append(results, resolved{id: e.id, title: linked.Title})
 	}
 
 	if len(results) == 0 {
@@ -417,34 +471,56 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		wt Worktree
 	}
 
+	// List worktrees for all repos concurrently.
+	type scanResult struct {
+		repoName   string
+		repoDirAbs string
+		worktrees  []repoWorktree
+	}
+	scanResults := make([]scanResult, len(repos))
+	var wgScan sync.WaitGroup
+	wgScan.Add(len(repos))
+	for i := range repos {
+		go func(idx int, r *repo.Repo) {
+			defer wgScan.Done()
+			out, gitErr := gitRun(r.LocalPath, "worktree", "list", "--porcelain")
+			if gitErr != nil {
+				return
+			}
+
+			repoDirAbs, absErr := filepath.Abs(r.LocalPath)
+			if absErr != nil {
+				return
+			}
+
+			worktrees := parseWorktreeList(out)
+			var rws []repoWorktree
+			for _, wt := range worktrees {
+				wtAbs, wtErr := filepath.Abs(wt.Path)
+				if wtErr != nil {
+					continue
+				}
+				if wtAbs == repoDirAbs {
+					continue
+				}
+				rws = append(rws, repoWorktree{r: r, wt: wt})
+			}
+
+			scanResults[idx] = scanResult{
+				repoName:   r.FullName(),
+				repoDirAbs: repoDirAbs,
+				worktrees:  rws,
+			}
+		}(i, &repos[i])
+	}
+	wgScan.Wait()
+
 	var discovered []repoWorktree
 	scannedRepos := make(map[string]bool)
-
-	for i := range repos {
-		r := &repos[i]
-		out, gitErr := gitRun(r.LocalPath, "worktree", "list", "--porcelain")
-		if gitErr != nil {
-			continue
-		}
-
-		scannedRepos[r.FullName()] = true
-		worktrees := parseWorktreeList(out)
-
-		repoDirAbs, absErr := filepath.Abs(r.LocalPath)
-		if absErr != nil {
-			continue
-		}
-
-		for _, wt := range worktrees {
-			wtAbs, wtErr := filepath.Abs(wt.Path)
-			if wtErr != nil {
-				continue
-			}
-			// Skip the main worktree (repo root itself).
-			if wtAbs == repoDirAbs {
-				continue
-			}
-			discovered = append(discovered, repoWorktree{r: r, wt: wt})
+	for _, sr := range scanResults {
+		if sr.repoName != "" {
+			scannedRepos[sr.repoName] = true
+			discovered = append(discovered, sr.worktrees...)
 		}
 	}
 
@@ -479,25 +555,40 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		}
 	}
 
-	// Resolve issues for new worktrees outside the lock (may call GitHub API).
+	// Resolve issues for new worktrees concurrently (may call GitHub API).
+	resolvedSessions := make([]Session, len(newEntries))
+	resolvedOK := make([]bool, len(newEntries))
+	var wgResolve sync.WaitGroup
+	wgResolve.Add(len(newEntries))
+	for i, d := range newEntries {
+		go func(idx int, d repoWorktree) {
+			defer wgResolve.Done()
+			issueNumber, issueRepo, issueTitle, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
+			if resolveErr != nil {
+				return
+			}
+			name := buildSessionName(d.r, &d.wt, issueNumber, issueRepo)
+			resolvedSessions[idx] = Session{
+				ID:           name,
+				IssueNumber:  issueNumber,
+				IssueTitle:   issueTitle,
+				Repo:         d.r.FullName(),
+				IssueRepo:    issueRepo,
+				Branch:       d.wt.Branch,
+				WorktreePath: d.wt.Path,
+				CreatedAt:    time.Now(),
+				Status:       StatusStopped,
+			}
+			resolvedOK[idx] = true
+		}(i, d)
+	}
+	wgResolve.Wait()
+
 	var newSessions []Session
-	for _, d := range newEntries {
-		issueNumber, issueRepo, issueTitle, resolveErr := m.resolveWorktreeIssue(d.r, &d.wt)
-		if resolveErr != nil {
-			continue
+	for i := range resolvedSessions {
+		if resolvedOK[i] {
+			newSessions = append(newSessions, resolvedSessions[i])
 		}
-		name := buildSessionName(d.r, &d.wt, issueNumber, issueRepo)
-		newSessions = append(newSessions, Session{
-			ID:           name,
-			IssueNumber:  issueNumber,
-			IssueTitle:   issueTitle,
-			Repo:         d.r.FullName(),
-			IssueRepo:    issueRepo,
-			Branch:       d.wt.Branch,
-			WorktreePath: d.wt.Path,
-			CreatedAt:    time.Now(),
-			Status:       StatusStopped,
-		})
 	}
 
 	// Under a single lock: add new sessions, prune stale ones, save.

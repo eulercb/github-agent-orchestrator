@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -50,28 +51,49 @@ func Discover(reposDir string) ([]Repo, error) {
 		return nil, fmt.Errorf("read repos dir %q: %w", absReposDir, err)
 	}
 
-	var repos []Repo
+	// Filter to git directories first (cheap stat check).
+	var gitDirs []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		dirPath := filepath.Join(absReposDir, entry.Name())
-
-		// Quick check: is this a git repo?
 		if _, statErr := os.Stat(filepath.Join(dirPath, ".git")); statErr != nil {
 			continue
 		}
+		gitDirs = append(gitDirs, dirPath)
+	}
 
-		owner, name, parseErr := parseGitHubRemote(dirPath)
-		if parseErr != nil {
-			continue
+	// Parse GitHub remotes concurrently. Each goroutine writes to its
+	// own slot so no mutex is needed for the results slice.
+	type repoResult struct {
+		repo Repo
+		ok   bool
+	}
+	results := make([]repoResult, len(gitDirs))
+	var wg sync.WaitGroup
+	wg.Add(len(gitDirs))
+	for i, dirPath := range gitDirs {
+		go func(idx int, dir string) {
+			defer wg.Done()
+			owner, name, parseErr := parseGitHubRemote(dir)
+			if parseErr != nil {
+				return
+			}
+			results[idx] = repoResult{
+				repo: Repo{Owner: owner, Name: name, LocalPath: dir},
+				ok:   true,
+			}
+		}(i, dirPath)
+	}
+	wg.Wait()
+
+	// Collect successful results in original directory order.
+	repos := make([]Repo, 0, len(results))
+	for _, r := range results {
+		if r.ok {
+			repos = append(repos, r.repo)
 		}
-
-		repos = append(repos, Repo{
-			Owner:     owner,
-			Name:      name,
-			LocalPath: dirPath,
-		})
 	}
 
 	return repos, nil

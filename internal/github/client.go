@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -150,38 +151,57 @@ func hasTypeQualifier(query string) bool {
 // Results from all repos are merged. The search parameter is passed to --search
 // when non-empty. Each returned PR has its Repository field set.
 func (c *Client) ListPRs(repos []string, search string) ([]PullRequest, error) {
+	// Fetch PRs from all repos concurrently. Each goroutine writes to
+	// its own slot so the results stay in deterministic order.
+	type prResult struct {
+		prs []PullRequest
+		err error
+	}
+	results := make([]prResult, len(repos))
+	var wg sync.WaitGroup
+	wg.Add(len(repos))
+	for i, repoFullName := range repos {
+		go func(idx int, repoName string) {
+			defer wg.Done()
+			args := []string{"pr", "list",
+				"--repo", repoName,
+				"--state", "open",
+				"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
+				"--limit", "50",
+			}
+			if search != "" {
+				args = append(args, "--search", search)
+			}
+
+			out, err := runGH(args...)
+			if err != nil {
+				results[idx] = prResult{err: fmt.Errorf("list PRs for %s: %w", repoName, err)}
+				return
+			}
+
+			var prs []PullRequest
+			if err := json.Unmarshal(out, &prs); err != nil {
+				results[idx] = prResult{err: fmt.Errorf("parse PR list for %s: %w", repoName, err)}
+				return
+			}
+			for j := range prs {
+				prs[j].Repository = Repository{NameWithOwner: repoName}
+			}
+			results[idx] = prResult{prs: prs}
+		}(i, repoFullName)
+	}
+	wg.Wait()
+
 	var allPRs []PullRequest
 	var firstErr error
-	for _, repoFullName := range repos {
-		args := []string{"pr", "list",
-			"--repo", repoFullName,
-			"--state", "open",
-			"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
-			"--limit", "50",
-		}
-		if search != "" {
-			args = append(args, "--search", search)
-		}
-
-		out, err := runGH(args...)
-		if err != nil {
+	for _, r := range results {
+		if r.err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("list PRs for %s: %w", repoFullName, err)
+				firstErr = r.err
 			}
 			continue
 		}
-
-		var prs []PullRequest
-		if err := json.Unmarshal(out, &prs); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("parse PR list for %s: %w", repoFullName, err)
-			}
-			continue
-		}
-		for i := range prs {
-			prs[i].Repository = Repository{NameWithOwner: repoFullName}
-		}
-		allPRs = append(allPRs, prs...)
+		allPRs = append(allPRs, r.prs...)
 	}
 	if len(allPRs) == 0 && firstErr != nil {
 		return nil, firstErr
