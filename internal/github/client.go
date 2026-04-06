@@ -191,6 +191,43 @@ func (c *Client) ListPRs(repos []string, search string) ([]PullRequest, error) {
 	return allPRs, nil
 }
 
+// FindPRForIssue searches for an open PR in prRepo that closes the given issue.
+// Uses GitHub search to find PRs that reference the issue number.
+func (c *Client) FindPRForIssue(prRepo, issueRepo string, issueNumber int) (*PullRequest, error) {
+	// GitHub's linked:issue search qualifier isn't available via gh, so we
+	// search for PRs mentioning the issue number. For cross-repo references
+	// the full "owner/repo#N" form is used.
+	var searchTerm string
+	if issueRepo == prRepo {
+		searchTerm = fmt.Sprintf("%d", issueNumber)
+	} else {
+		searchTerm = fmt.Sprintf("%s#%d", issueRepo, issueNumber)
+	}
+
+	args := []string{"pr", "list",
+		"--repo", prRepo,
+		"--state", "all",
+		"--search", searchTerm,
+		"--json", "number,title,state,url,isDraft,headRefName,reviewDecision,author,labels",
+		"--limit", "1",
+	}
+
+	out, err := runGH(args...)
+	if err != nil {
+		return nil, fmt.Errorf("find PR for issue %s#%d: %w", issueRepo, issueNumber, err)
+	}
+
+	var prs []PullRequest
+	if err := json.Unmarshal(out, &prs); err != nil {
+		return nil, fmt.Errorf("parse PRs: %w", err)
+	}
+
+	if len(prs) == 0 {
+		return nil, nil
+	}
+	return &prs[0], nil
+}
+
 // FindPRForBranch looks for a PR with the given head branch.
 func (c *Client) FindPRForBranch(repoFullName, branch string) (*PullRequest, error) {
 	args := []string{"pr", "list",

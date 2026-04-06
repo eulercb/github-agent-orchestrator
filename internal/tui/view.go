@@ -508,7 +508,7 @@ func (m *Model) renderHelpBar() string {
 	case PanelIssues:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "o open", "r refresh", "? help", "q quit"}
 	case PanelSessions:
-		items = []string{"↑↓ navigate", "tab switch", "a attach", "w import worktrees", "o open PR", "x kill", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "a attach", "w import", "o open PR", "x kill", "r refresh", "? help", "q quit"}
 	case PanelPRs:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "o open PR", "c clear session", "r refresh", "? help", "q quit"}
 	}
@@ -533,7 +533,7 @@ func (m *Model) viewHelp() string {
     /            Edit issue/PR filter in Issues or PRs panels (GitHub search syntax)
     s            Spawn a new Claude Code session for selected issue
     a            Attach to selected session (opens interactive Claude)
-    w            Import worktrees as sessions (with PR association)
+    w            Import worktree (Issues: by issue PR, PRs: by branch, Sessions: all)
     o            Open issue/PR in browser
     x            Kill selected session
     c            Clear session for selected PR (in PRs panel)

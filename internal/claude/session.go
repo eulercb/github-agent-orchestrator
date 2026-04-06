@@ -391,6 +391,21 @@ func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, e
 	return untracked, nil
 }
 
+// FindWorktreeByBranch returns the untracked worktree whose branch matches
+// the given name, or nil if no match is found.
+func (m *Manager) FindWorktreeByBranch(repo *config.RepoConfig, branch string) (*Worktree, error) {
+	worktrees, err := m.ListUntrackedWorktrees(repo)
+	if err != nil {
+		return nil, err
+	}
+	for i := range worktrees {
+		if worktrees[i].Branch == branch {
+			return &worktrees[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // parseWorktreeList parses the porcelain output of `git worktree list --porcelain`.
 func parseWorktreeList(output string) []Worktree {
 	var worktrees []Worktree

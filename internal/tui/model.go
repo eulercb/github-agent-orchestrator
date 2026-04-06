@@ -356,8 +356,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
-		if m.activePanel == PanelSessions {
-			cmd := m.importWorktrees()
+		cmd := m.importWorktrees()
+		if cmd != nil {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.Open):
@@ -700,6 +700,88 @@ func (m *Model) importWorktrees() tea.Cmd {
 		m.errorMsg = "No repos configured"
 		return nil
 	}
+
+	switch m.activePanel {
+	case PanelIssues:
+		return m.importWorktreeForIssue(repo)
+	case PanelPRs:
+		return m.importWorktreeForPR(repo)
+	default:
+		return m.importAllWorktrees(repo)
+	}
+}
+
+// importWorktreeForIssue finds the PR for the selected issue, then imports
+// the worktree matching that PR's branch.
+func (m *Model) importWorktreeForIssue(repo *config.RepoConfig) tea.Cmd {
+	issue := m.selectedIssue()
+	if issue == nil {
+		return nil
+	}
+
+	issueRepo := issue.Repository.NameWithOwner
+	if issueRepo == "" {
+		issueRepo = repo.IssueRepoFullName()
+	}
+	issueNum := issue.Number
+	prRepo := repo.FullName()
+	repoCopy := *repo
+	ghClient := m.gh
+	sessMgr := m.sessions
+
+	return func() tea.Msg {
+		pr, err := ghClient.FindPRForIssue(prRepo, issueRepo, issueNum)
+		if err != nil {
+			return worktreesImportedMsg{err: fmt.Errorf("find PR for #%d: %w", issueNum, err)}
+		}
+		if pr == nil {
+			return worktreesImportedMsg{err: fmt.Errorf("no PR found for issue #%d", issueNum)}
+		}
+
+		wt, err := sessMgr.FindWorktreeByBranch(&repoCopy, pr.HeadRef)
+		if err != nil {
+			return worktreesImportedMsg{err: err}
+		}
+		if wt == nil {
+			return worktreesImportedMsg{err: fmt.Errorf("no worktree found for branch %s", pr.HeadRef)}
+		}
+
+		if _, err := sessMgr.ImportWorktree(&repoCopy, wt); err != nil {
+			return worktreesImportedMsg{err: err}
+		}
+		return worktreesImportedMsg{count: 1}
+	}
+}
+
+// importWorktreeForPR imports the worktree matching the selected PR's branch.
+func (m *Model) importWorktreeForPR(repo *config.RepoConfig) tea.Cmd {
+	pr := m.selectedPR()
+	if pr == nil {
+		return nil
+	}
+
+	branch := pr.HeadRef
+	repoCopy := *repo
+	sessMgr := m.sessions
+
+	return func() tea.Msg {
+		wt, err := sessMgr.FindWorktreeByBranch(&repoCopy, branch)
+		if err != nil {
+			return worktreesImportedMsg{err: err}
+		}
+		if wt == nil {
+			return worktreesImportedMsg{err: fmt.Errorf("no worktree found for branch %s", branch)}
+		}
+
+		if _, err := sessMgr.ImportWorktree(&repoCopy, wt); err != nil {
+			return worktreesImportedMsg{err: err}
+		}
+		return worktreesImportedMsg{count: 1}
+	}
+}
+
+// importAllWorktrees imports all untracked worktrees (Sessions panel behavior).
+func (m *Model) importAllWorktrees(repo *config.RepoConfig) tea.Cmd {
 	repoCopy := *repo
 	sessMgr := m.sessions
 

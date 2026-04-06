@@ -65,14 +65,14 @@ func (r *RepoConfig) IssueRepoFullName() string {
 // RepoLocalDir resolves the local filesystem path for a repository.
 // Resolution order:
 //  1. repo.LocalPath (per-repo override)
-//  2. config.ReposDir/<repo.Owner>/<repo.Name> (global repos root)
+//  2. config.ReposDir/<repo.Name> (global repos root)
 //  3. ~/<repo.Name> (fallback)
 func (c *Config) RepoLocalDir(repo *RepoConfig) (string, error) {
 	if repo.LocalPath != "" {
 		return repo.LocalPath, nil
 	}
 	if c.ReposDir != "" {
-		return filepath.Join(c.ReposDir, repo.Owner, repo.Name), nil
+		return filepath.Join(c.ReposDir, repo.Name), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

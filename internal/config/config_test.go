@@ -99,7 +99,7 @@ func TestRepoLocalDir(t *testing.T) {
 		cfg := Config{ReposDir: "/repos"}
 		dir, err := cfg.RepoLocalDir(repo)
 		require.NoError(t, err)
-		assert.Equal(t, "/repos/acme/app", dir)
+		assert.Equal(t, "/repos/app", dir)
 	})
 
 	t.Run("home fallback", func(t *testing.T) {
