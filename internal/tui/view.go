@@ -299,10 +299,12 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 	}
 
 	issueRef := fmt.Sprintf("#%-5d", sess.IssueNumber)
-	branchShort := sess.Branch
-	branchRunes := []rune(branchShort)
-	if len(branchRunes) > 25 {
-		branchShort = string(branchRunes[:22]) + "..."
+
+	// Issue title (truncated)
+	issueTitle := sess.IssueTitle
+	issueTitleRunes := []rune(issueTitle)
+	if len(issueTitleRunes) > 30 {
+		issueTitle = string(issueTitleRunes[:27]) + "..."
 	}
 
 	statusStr := statusStyle.Render(fmt.Sprintf("%s %s", statusIcon, statusText))
@@ -313,7 +315,7 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 		prStr = m.renderPRStatus(pr)
 	}
 
-	content := fmt.Sprintf("  %s %-25s %s  %s", issueRef, branchShort, statusStr, prStr)
+	content := fmt.Sprintf("  %s %s  %s  %s", issueRef, statusStr, prStr, issueTitle)
 
 	// Add last activity
 	if sess.LastActivity != "" && !selected {
@@ -371,7 +373,7 @@ func (m *Model) renderHelpBar() string {
 	case PanelIssues:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "i hide issues", "r refresh", "? help", "q quit"}
 	case PanelSessions:
-		items = []string{"↑↓ navigate", "a attach", "w scan", "o open PR", "x kill"}
+		items = []string{"↑↓ navigate", "a attach", "w scan", "o open PR", "O open issue", "x kill"}
 		if m.showIssues {
 			items = append(items, "tab switch", "i hide issues")
 		} else {
@@ -402,6 +404,7 @@ func (m *Model) viewHelp() string {
     a            Attach to selected session (opens interactive Claude)
     w            Scan worktrees (discover new, remove stale)
     o            Open issue/PR in browser
+    O            Open session's issue in browser (Sessions panel)
     x            Kill selected session
     i            Toggle issues panel visibility
     r            Refresh issues and session statuses

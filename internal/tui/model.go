@@ -388,6 +388,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd
+	case key.Matches(msg, m.keys.OpenIssue):
+		if m.activePanel == PanelSessions {
+			cmd := m.openSessionIssueBrowser()
+			return m, cmd
+		}
 	case key.Matches(msg, m.keys.Delete):
 		if m.activePanel == PanelSessions {
 			m.killSession()
@@ -767,6 +772,22 @@ func (m *Model) openInBrowser() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (m *Model) openSessionIssueBrowser() tea.Cmd {
+	sess := m.selectedSession()
+	if sess == nil {
+		return nil
+	}
+	issueRepo := sess.IssueRepoName()
+	if issueRepo == "" {
+		return nil
+	}
+	number := sess.IssueNumber
+	ghClient := m.gh
+	return func() tea.Msg {
+		return openBrowserMsg{err: ghClient.OpenInBrowser(issueRepo, number)}
+	}
 }
 
 func (m *Model) killSession() {

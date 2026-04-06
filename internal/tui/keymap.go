@@ -13,6 +13,7 @@ type KeyMap struct {
 	Attach          key.Binding
 	ImportWorktrees key.Binding
 	Open            key.Binding
+	OpenIssue       key.Binding
 	Delete          key.Binding
 	Refresh         key.Binding
 	Help            key.Binding
@@ -59,6 +60,10 @@ func DefaultKeyMap() KeyMap {
 		Open: key.NewBinding(
 			key.WithKeys("o"),
 			key.WithHelp("o", "open in browser"),
+		),
+		OpenIssue: key.NewBinding(
+			key.WithKeys("O"),
+			key.WithHelp("O", "open issue in browser"),
 		),
 		Delete: key.NewBinding(
 			key.WithKeys("x"),
