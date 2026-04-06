@@ -63,6 +63,7 @@ type Model struct {
 	activePanel   Panel
 	issues        []github.Issue
 	prCache       map[string]*github.PullRequest // "repo:branch" -> PR
+	fetchingPRs   bool
 	issuesCursor  int
 	sessionCursor int
 	statusBarText string
@@ -253,6 +254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
+		m.fetchingPRs = false
 		m.loading = false
 		if msg.err != nil {
 			// Preserve previously known PRs when some lookups fail,
@@ -652,6 +654,11 @@ func (m *Model) fetchIssues() tea.Cmd {
 }
 
 func (m *Model) fetchPRs() tea.Cmd {
+	if m.fetchingPRs {
+		m.debugLog.Info("Skipping PR fetch: previous fetch still in progress")
+		return nil
+	}
+	m.fetchingPRs = true
 	dbg := m.debugLog
 	return func() tea.Msg {
 		sessions := m.sessions.Sessions()
