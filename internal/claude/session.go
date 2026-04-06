@@ -142,7 +142,7 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 
 	// Persist issue metadata inside the worktree so that future imports
 	// can associate the worktree with the issue without relying on branch names.
-	// Only relevant in worktree mode — ImportWorktree only scans .worktrees/.
+	// Only relevant in worktree mode — SyncWorktrees discovers these.
 	issueRepo := repo.IssueRepoFullName()
 	if m.cfg.Spawn.UseWorktree {
 		if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
@@ -335,75 +335,156 @@ func readWorktreeMetadata(worktreePath string) (*worktreeMetadata, error) {
 	return &meta, nil
 }
 
-// ListUntrackedWorktrees returns worktrees under the repo's .worktrees/
-// directory that are not yet associated with any session. These follow the
-// Claude Code worktree convention and can be imported as sessions.
-func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, error) {
-	repoDir, err := m.cfg.RepoLocalDir(repo)
-	if err != nil {
-		return nil, err
+// SyncResult summarises the changes made by SyncWorktrees.
+type SyncResult struct {
+	Added   int
+	Removed int
+}
+
+// SyncWorktrees discovers worktrees across all configured repos, registers
+// new ones as sessions, and removes sessions whose worktree no longer exists.
+//
+// For each new worktree the issue association is resolved via:
+//  1. .claude/gao.local.yaml metadata file (instant, written by SpawnSession).
+//  2. GitHub GraphQL for the PR's linked issue references.
+//  3. Fall back to unassociated (issue number 0).
+//
+// Sessions whose repo could not be scanned (bad path, git error) are left
+// untouched — only repos that were successfully listed participate in the
+// removal of stale sessions.
+func (m *Manager) SyncWorktrees() (*SyncResult, error) {
+	type repoWorktree struct {
+		repo *config.RepoConfig
+		wt   Worktree
 	}
 
-	out, err := gitRun(repoDir, "worktree", "list", "--porcelain")
-	if err != nil {
-		if out != "" {
-			return nil, fmt.Errorf("list worktrees: %s: %w", out, err)
+	var discovered []repoWorktree
+	scannedRepos := make(map[string]bool)
+
+	for i := range m.cfg.Repos {
+		repo := &m.cfg.Repos[i]
+		repoDir, err := m.cfg.RepoLocalDir(repo)
+		if err != nil {
+			continue
 		}
-		return nil, fmt.Errorf("list worktrees: %w", err)
+
+		out, err := gitRun(repoDir, "worktree", "list", "--porcelain")
+		if err != nil {
+			continue
+		}
+
+		scannedRepos[repo.FullName()] = true
+		worktrees := parseWorktreeList(out)
+
+		repoDirAbs, absErr := filepath.Abs(repoDir)
+		if absErr != nil {
+			continue
+		}
+
+		for _, wt := range worktrees {
+			wtAbs, wtErr := filepath.Abs(wt.Path)
+			if wtErr != nil {
+				continue
+			}
+			// Skip the main worktree (repo root itself).
+			if wtAbs == repoDirAbs {
+				continue
+			}
+			discovered = append(discovered, repoWorktree{repo: repo, wt: wt})
+		}
 	}
 
-	worktrees := parseWorktreeList(out)
-
-	// Normalize worktreeBase so path comparisons are reliable even when
-	// repos_dir is relative. Note: symlinks are not resolved.
-	worktreeBase, err := filepath.Abs(filepath.Join(repoDir, ".worktrees"))
-	if err != nil {
-		return nil, fmt.Errorf("resolve worktree base: %w", err)
+	// Build set of discovered worktree paths.
+	discoveredPaths := make(map[string]bool, len(discovered))
+	for _, d := range discovered {
+		if abs, err := filepath.Abs(d.wt.Path); err == nil {
+			discoveredPaths[abs] = true
+		}
 	}
-	worktreeBase += string(filepath.Separator)
 
+	// Find which discovered worktrees are not yet tracked.
 	m.mu.RLock()
-	tracked := make(map[string]bool, len(m.sessions))
+	trackedPaths := make(map[string]bool, len(m.sessions))
 	for i := range m.sessions {
-		p := m.sessions[i].WorktreePath
-		if abs, absErr := filepath.Abs(p); absErr == nil {
-			p = abs
+		if p := m.sessions[i].WorktreePath; p != "" {
+			if abs, err := filepath.Abs(p); err == nil {
+				trackedPaths[abs] = true
+			}
 		}
-		tracked[p] = true
 	}
 	m.mu.RUnlock()
 
-	var untracked []Worktree
-	for _, wt := range worktrees {
-		absPath := wt.Path
-		if abs, absErr := filepath.Abs(wt.Path); absErr == nil {
-			absPath = abs
-		}
-		if !strings.HasPrefix(absPath, worktreeBase) {
+	var newEntries []repoWorktree
+	for _, d := range discovered {
+		abs, err := filepath.Abs(d.wt.Path)
+		if err != nil {
 			continue
 		}
-		if tracked[absPath] {
+		if !trackedPaths[abs] {
+			newEntries = append(newEntries, d)
+		}
+	}
+
+	// Resolve issues for new worktrees outside the lock (may call GitHub API).
+	var newSessions []Session
+	for _, d := range newEntries {
+		issueNumber, issueRepo, _ := m.resolveWorktreeIssue(d.repo, &d.wt)
+		name := buildSessionName(d.repo, &d.wt, issueNumber, issueRepo)
+		newSessions = append(newSessions, Session{
+			ID:           name,
+			IssueNumber:  issueNumber,
+			Repo:         d.repo.FullName(),
+			IssueRepo:    issueRepo,
+			Branch:       d.wt.Branch,
+			WorktreePath: d.wt.Path,
+			CreatedAt:    time.Now(),
+			Status:       StatusStopped,
+		})
+	}
+
+	// Under a single lock: add new sessions, prune stale ones, save.
+	m.mu.Lock()
+
+	// Remove sessions whose worktree is gone (only for repos we scanned).
+	var kept []Session
+	var removed int
+	for i := range m.sessions {
+		s := &m.sessions[i]
+		if s.WorktreePath == "" || !scannedRepos[s.Repo] {
+			kept = append(kept, *s)
 			continue
 		}
-		untracked = append(untracked, wt)
-	}
-
-	return untracked, nil
-}
-
-// FindWorktreeByBranch returns the untracked worktree whose branch matches
-// the given name, or nil if no match is found.
-func (m *Manager) FindWorktreeByBranch(repo *config.RepoConfig, branch string) (*Worktree, error) {
-	worktrees, err := m.ListUntrackedWorktrees(repo)
-	if err != nil {
-		return nil, err
-	}
-	for i := range worktrees {
-		if worktrees[i].Branch == branch {
-			return &worktrees[i], nil
+		abs, err := filepath.Abs(s.WorktreePath)
+		if err != nil || discoveredPaths[abs] {
+			kept = append(kept, *s)
+			continue
 		}
+		removed++
 	}
-	return nil, nil
+
+	// Add new sessions, skipping ID collisions.
+	existingIDs := make(map[string]bool, len(kept))
+	for i := range kept {
+		existingIDs[kept[i].ID] = true
+	}
+	var added int
+	for i := range newSessions {
+		if existingIDs[newSessions[i].ID] {
+			continue
+		}
+		kept = append(kept, newSessions[i])
+		existingIDs[newSessions[i].ID] = true
+		added++
+	}
+
+	m.sessions = kept
+	m.mu.Unlock()
+
+	if err := m.saveState(); err != nil {
+		return nil, fmt.Errorf("save state: %w", err)
+	}
+
+	return &SyncResult{Added: added, Removed: removed}, nil
 }
 
 // parseWorktreeList parses the porcelain output of `git worktree list --porcelain`.
@@ -433,69 +514,10 @@ func parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
-// ImportWorktree registers an existing worktree as a tracked session without
-// starting a process. The session appears as stopped so the user can attach
-// to it interactively via the existing attach flow.
-//
-// Issue metadata is resolved in order:
-//  1. Read from .claude/gao.local.yaml in the worktree (written by SpawnSession).
-//  2. Query GitHub GraphQL for the PR's closing issue references.
-//  3. Fall back to unassociated (issue number 0).
-//
-// When the metadata is resolved via GitHub, it is persisted to the file
-// so subsequent imports are instant.
-func (m *Manager) ImportWorktree(repo *config.RepoConfig, wt *Worktree) (*Session, error) {
-	issueNumber, issueRepo, err := m.resolveWorktreeIssue(repo, wt)
-	if err != nil {
-		return nil, fmt.Errorf("resolve issue for worktree %s: %w", wt.Path, err)
-	}
-
-	// Build session name consistent with SpawnSession conventions.
-	sessionName := m.buildSessionName(repo, wt, issueNumber, issueRepo)
-
-	sess := Session{
-		ID:           sessionName,
-		IssueNumber:  issueNumber,
-		Repo:         repo.FullName(),
-		IssueRepo:    issueRepo,
-		Branch:       wt.Branch,
-		WorktreePath: wt.Path,
-		CreatedAt:    time.Now(),
-		Status:       StatusStopped,
-	}
-
-	// Check-and-append under a single lock to avoid TOCTOU races.
-	m.mu.Lock()
-	for i := range m.sessions {
-		if m.sessions[i].ID == sessionName {
-			m.mu.Unlock()
-			return nil, fmt.Errorf("session %q already exists", sessionName)
-		}
-	}
-	m.sessions = append(m.sessions, sess)
-	m.mu.Unlock()
-
-	if err := m.saveState(); err != nil {
-		m.mu.Lock()
-		for i := len(m.sessions) - 1; i >= 0; i-- {
-			if m.sessions[i].ID == sess.ID {
-				m.sessions = append(m.sessions[:i], m.sessions[i+1:]...)
-				break
-			}
-		}
-		m.mu.Unlock()
-		return nil, fmt.Errorf("save state: %w", err)
-	}
-
-	return &sess, nil
-}
-
 // resolveWorktreeIssue determines the issue number and repo for a worktree.
 // It tries the local metadata file first, then GitHub GraphQL, persisting
-// the result on success. Returns an error only when the metadata file exists
-// but cannot be read/parsed (to avoid silently dropping associations).
+// the result on success.
 func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (issueNumber int, issueRepo string, err error) {
-	// 1. Try the local metadata file.
 	meta, metaErr := readWorktreeMetadata(wt.Path)
 	if metaErr != nil {
 		return 0, "", metaErr
@@ -504,12 +526,10 @@ func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (i
 		return meta.IssueNumber, meta.IssueRepo, nil
 	}
 
-	// 2. Try GitHub GraphQL to find the PR's linked issue.
 	if m.gh != nil && wt.Branch != "" {
 		linked, ghErr := m.gh.FindLinkedIssue(repo.FullName(), wt.Branch)
 		if ghErr == nil && linked != nil {
 			issueRepo = linked.Repository
-			// Persist so we don't need the API next time.
 			_ = writeWorktreeMetadata(wt.Path, &worktreeMetadata{
 				IssueNumber: linked.Number,
 				IssueRepo:   issueRepo,
@@ -518,21 +538,18 @@ func (m *Manager) resolveWorktreeIssue(repo *config.RepoConfig, wt *Worktree) (i
 		}
 	}
 
-	// 3. No issue association found.
 	return 0, "", nil
 }
 
-// buildSessionName generates a session ID consistent with SpawnSession.
-func (m *Manager) buildSessionName(repo *config.RepoConfig, wt *Worktree, issueNumber int, issueRepo string) string {
+// buildSessionName generates a human-readable session ID.
+func buildSessionName(repo *config.RepoConfig, wt *Worktree, issueNumber int, issueRepo string) string {
 	switch {
 	case issueNumber > 0 && issueRepo != "" && issueRepo != repo.FullName():
-		// Cross-repo issue: use the issue repo ID in the name.
 		issueRepoID := strings.ReplaceAll(issueRepo, "/", "-")
 		return fmt.Sprintf("gao-%s-%s-%s-%d", repo.Owner, repo.Name, issueRepoID, issueNumber)
 	case issueNumber > 0:
 		return fmt.Sprintf("gao-%s-%s-%d", repo.Owner, repo.Name, issueNumber)
 	default:
-		// No issue: sanitize branch or path for use as session suffix.
 		safe := strings.NewReplacer("/", "-", ".", "-").Replace(wt.Branch)
 		if safe == "" {
 			safe = filepath.Base(wt.Path)

@@ -54,7 +54,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		ImportWorktrees: key.NewBinding(
 			key.WithKeys("w"),
-			key.WithHelp("w", "import worktrees"),
+			key.WithHelp("w", "scan worktrees"),
 		),
 		Open: key.NewBinding(
 			key.WithKeys("o"),

@@ -138,9 +138,10 @@ type sessionKilledMsg struct {
 	err error
 }
 
-type worktreesImportedMsg struct {
-	count int
-	err   error
+type worktreesSyncedMsg struct {
+	added   int
+	removed int
+	err     error
 }
 
 type openBrowserMsg struct {
@@ -159,6 +160,7 @@ func (m Model) Init() tea.Cmd { //nolint:gocritic // tea.Model interface require
 		m.fetchIssues(),
 		m.fetchPRList(),
 		m.refreshStatuses(),
+		m.syncWorktrees(),
 		m.tickCmd(),
 	)
 }
@@ -264,21 +266,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			}
 		}
 		return m, filterCmd
-	case worktreesImportedMsg:
-		switch {
-		case msg.err != nil && msg.count > 0:
-			m.errorMsg = fmt.Sprintf("Imported %d worktree(s), then: %v", msg.count, msg.err)
-			m.activePanel = PanelSessions
-			return m, tea.Batch(filterCmd, m.fetchPRs())
-		case msg.err != nil:
-			m.errorMsg = fmt.Sprintf("Import worktrees failed: %v", msg.err)
-		case msg.count == 0:
-			m.errorMsg = "No untracked worktrees found"
-		default:
-			m.errorMsg = ""
-			m.activePanel = PanelSessions
+	case worktreesSyncedMsg:
+		if msg.err != nil {
+			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
+			return m, filterCmd
+		}
+		if msg.added > 0 || msg.removed > 0 {
+			var parts []string
+			if msg.added > 0 {
+				parts = append(parts, fmt.Sprintf("%d added", msg.added))
+			}
+			if msg.removed > 0 {
+				parts = append(parts, fmt.Sprintf("%d removed", msg.removed))
+			}
+			m.errorMsg = fmt.Sprintf("Worktrees synced: %s", strings.Join(parts, ", "))
 			return m, tea.Batch(filterCmd, m.fetchPRs())
 		}
+		m.errorMsg = ""
 		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
@@ -356,10 +360,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
-		cmd := m.importWorktrees()
-		if cmd != nil {
-			return m, cmd
-		}
+		cmd := m.syncWorktrees()
+		return m, cmd
 	case key.Matches(msg, m.keys.Open):
 		cmd := m.openInBrowser()
 		return m, cmd
@@ -694,118 +696,14 @@ func (m *Model) resolveAttachCommand(workDir string) string {
 	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
 }
 
-func (m *Model) importWorktrees() tea.Cmd {
-	repo := m.currentRepo()
-	if repo == nil {
-		m.errorMsg = "No repos configured"
-		return nil
-	}
-
-	switch m.activePanel {
-	case PanelIssues:
-		return m.importWorktreeForIssue(repo)
-	case PanelPRs:
-		return m.importWorktreeForPR(repo)
-	default:
-		return m.importAllWorktrees(repo)
-	}
-}
-
-// importWorktreeForIssue finds the PR for the selected issue, then imports
-// the worktree matching that PR's branch.
-func (m *Model) importWorktreeForIssue(repo *config.RepoConfig) tea.Cmd {
-	issue := m.selectedIssue()
-	if issue == nil {
-		return nil
-	}
-
-	issueRepo := issue.Repository.NameWithOwner
-	if issueRepo == "" {
-		issueRepo = repo.IssueRepoFullName()
-	}
-	issueNum := issue.Number
-	prRepo := repo.FullName()
-	repoCopy := *repo
-	ghClient := m.gh
+func (m *Model) syncWorktrees() tea.Cmd {
 	sessMgr := m.sessions
-
 	return func() tea.Msg {
-		pr, err := ghClient.FindPRForIssue(prRepo, issueRepo, issueNum)
+		result, err := sessMgr.SyncWorktrees()
 		if err != nil {
-			return worktreesImportedMsg{err: fmt.Errorf("find PR for #%d: %w", issueNum, err)}
+			return worktreesSyncedMsg{err: err}
 		}
-		if pr == nil {
-			return worktreesImportedMsg{err: fmt.Errorf("no PR found for issue #%d", issueNum)}
-		}
-
-		wt, err := sessMgr.FindWorktreeByBranch(&repoCopy, pr.HeadRef)
-		if err != nil {
-			return worktreesImportedMsg{err: err}
-		}
-		if wt == nil {
-			return worktreesImportedMsg{err: fmt.Errorf("no worktree found for branch %s", pr.HeadRef)}
-		}
-
-		if _, err := sessMgr.ImportWorktree(&repoCopy, wt); err != nil {
-			return worktreesImportedMsg{err: err}
-		}
-		return worktreesImportedMsg{count: 1}
-	}
-}
-
-// importWorktreeForPR imports the worktree matching the selected PR's branch.
-func (m *Model) importWorktreeForPR(repo *config.RepoConfig) tea.Cmd {
-	pr := m.selectedPR()
-	if pr == nil {
-		return nil
-	}
-
-	branch := pr.HeadRef
-	repoCopy := *repo
-	sessMgr := m.sessions
-
-	return func() tea.Msg {
-		wt, err := sessMgr.FindWorktreeByBranch(&repoCopy, branch)
-		if err != nil {
-			return worktreesImportedMsg{err: err}
-		}
-		if wt == nil {
-			return worktreesImportedMsg{err: fmt.Errorf("no worktree found for branch %s", branch)}
-		}
-
-		if _, err := sessMgr.ImportWorktree(&repoCopy, wt); err != nil {
-			return worktreesImportedMsg{err: err}
-		}
-		return worktreesImportedMsg{count: 1}
-	}
-}
-
-// importAllWorktrees imports all untracked worktrees (Sessions panel behavior).
-func (m *Model) importAllWorktrees(repo *config.RepoConfig) tea.Cmd {
-	repoCopy := *repo
-	sessMgr := m.sessions
-
-	return func() tea.Msg {
-		orphans, err := sessMgr.ListUntrackedWorktrees(&repoCopy)
-		if err != nil {
-			return worktreesImportedMsg{err: err}
-		}
-		if len(orphans) == 0 {
-			return worktreesImportedMsg{count: 0}
-		}
-
-		var imported int
-		for i := range orphans {
-			if _, err := sessMgr.ImportWorktree(&repoCopy, &orphans[i]); err != nil {
-				name := orphans[i].Branch
-				if name == "" {
-					name = orphans[i].Path
-				}
-				return worktreesImportedMsg{count: imported, err: fmt.Errorf("import %s: %w", name, err)}
-			}
-			imported++
-		}
-		return worktreesImportedMsg{count: imported}
+		return worktreesSyncedMsg{added: result.Added, removed: result.Removed}
 	}
 }
 

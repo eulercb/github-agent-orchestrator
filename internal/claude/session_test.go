@@ -1,7 +1,9 @@
 package claude
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -214,12 +216,47 @@ func TestWorktreeMetadata(t *testing.T) {
 	})
 }
 
-func TestImportWorktree(t *testing.T) {
+// initTestGitRepo creates a git repo with an initial commit and returns its path.
+func initTestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(context.Background(), "git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	run("init", "-b", "main")
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "Test")
+	run("config", "commit.gpgsign", "false")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0o600))
+	run("add", ".")
+	run("commit", "-m", "initial")
+	return dir
+}
+
+func TestSyncWorktrees(t *testing.T) {
+	repoDir := initTestGitRepo(t)
 	stateDir := t.TempDir()
+
+	// Create a worktree inside the repo.
+	wtPath := filepath.Join(repoDir, ".worktrees", "claude-issue-42")
+	cmd := exec.CommandContext(context.Background(), "git", "worktree", "add", "-b", "claude/issue-42", wtPath)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git worktree add: %s", out)
+
+	// Write metadata for the worktree.
+	require.NoError(t, writeWorktreeMetadata(wtPath, &worktreeMetadata{
+		IssueNumber: 42,
+		IssueRepo:   "acme/app",
+	}))
 
 	cfg := &config.Config{
 		Repos: []config.RepoConfig{
-			{Owner: "acme", Name: "app"},
+			{Owner: "acme", Name: "app", LocalPath: repoDir},
 		},
 		SessionDir: stateDir,
 	}
@@ -227,78 +264,113 @@ func TestImportWorktree(t *testing.T) {
 	mgr, err := NewManager(cfg, nil)
 	require.NoError(t, err)
 
-	repo := &cfg.Repos[0]
-
-	t.Run("reads metadata file", func(t *testing.T) {
-		wtDir := filepath.Join(t.TempDir(), "wt-42")
-		require.NoError(t, os.MkdirAll(wtDir, 0o750))
-		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
-			IssueNumber: 42,
-			IssueRepo:   "acme/app",
-		}))
-
-		wt := &Worktree{Path: wtDir, Branch: "claude/issue-42"}
-		sess, err := mgr.ImportWorktree(repo, wt)
+	t.Run("discovers new worktrees", func(t *testing.T) {
+		result, err := mgr.SyncWorktrees()
 		require.NoError(t, err)
-		assert.Equal(t, "gao-acme-app-42", sess.ID)
-		assert.Equal(t, 42, sess.IssueNumber)
-		assert.Equal(t, "acme/app", sess.IssueRepo)
-		assert.Equal(t, StatusStopped, sess.Status)
-		assert.Equal(t, 0, sess.PID)
+		assert.Equal(t, 1, result.Added)
+		assert.Equal(t, 0, result.Removed)
+
+		sessions := mgr.Sessions()
+		require.Len(t, sessions, 1)
+		assert.Equal(t, "gao-acme-app-42", sessions[0].ID)
+		assert.Equal(t, 42, sessions[0].IssueNumber)
+		assert.Equal(t, "acme/app", sessions[0].IssueRepo)
+		assert.Equal(t, "claude/issue-42", sessions[0].Branch)
+		assert.Equal(t, StatusStopped, sessions[0].Status)
+	})
+
+	t.Run("idempotent re-sync", func(t *testing.T) {
+		result, err := mgr.SyncWorktrees()
+		require.NoError(t, err)
+		assert.Equal(t, 0, result.Added)
+		assert.Equal(t, 0, result.Removed)
+		assert.Len(t, mgr.Sessions(), 1)
+	})
+
+	t.Run("removes stale sessions", func(t *testing.T) {
+		// Remove the worktree (force because metadata files are untracked).
+		rmCmd := exec.CommandContext(context.Background(), "git", "worktree", "remove", "--force", wtPath)
+		rmCmd.Dir = repoDir
+		rmOut, rmErr := rmCmd.CombinedOutput()
+		require.NoError(t, rmErr, "git worktree remove: %s", rmOut)
+
+		result, err := mgr.SyncWorktrees()
+		require.NoError(t, err)
+		assert.Equal(t, 0, result.Added)
+		assert.Equal(t, 1, result.Removed)
+		assert.Empty(t, mgr.Sessions())
 	})
 
 	t.Run("cross-repo metadata", func(t *testing.T) {
-		wtDir := filepath.Join(t.TempDir(), "wt-cross")
-		require.NoError(t, os.MkdirAll(wtDir, 0o750))
-		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
+		// Create a new worktree with cross-repo metadata.
+		wtPath2 := filepath.Join(repoDir, ".worktrees", "claude-cross-7")
+		cmd := exec.CommandContext(context.Background(), "git", "worktree", "add", "-b", "claude/cross-7", wtPath2)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git worktree add: %s", out)
+		require.NoError(t, writeWorktreeMetadata(wtPath2, &worktreeMetadata{
 			IssueNumber: 7,
 			IssueRepo:   "other/repo",
 		}))
 
-		wt := &Worktree{Path: wtDir, Branch: "claude/issue-other-repo-7"}
-		sess, err := mgr.ImportWorktree(repo, wt)
-		require.NoError(t, err)
-		assert.Equal(t, "gao-acme-app-other-repo-7", sess.ID)
-		assert.Equal(t, 7, sess.IssueNumber)
-		assert.Equal(t, "other/repo", sess.IssueRepo)
+		result, syncErr := mgr.SyncWorktrees()
+		require.NoError(t, syncErr)
+		assert.Equal(t, 1, result.Added)
+
+		sessions := mgr.Sessions()
+		require.Len(t, sessions, 1)
+		assert.Equal(t, "gao-acme-app-other-repo-7", sessions[0].ID)
+		assert.Equal(t, 7, sessions[0].IssueNumber)
+		assert.Equal(t, "other/repo", sessions[0].IssueRepo)
 	})
 
 	t.Run("no metadata falls back to unassociated", func(t *testing.T) {
-		wtDir := filepath.Join(t.TempDir(), "wt-bare")
-		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+		wtPath3 := filepath.Join(repoDir, ".worktrees", "feature-bare")
+		cmd := exec.CommandContext(context.Background(), "git", "worktree", "add", "-b", "feature/bare", wtPath3)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git worktree add: %s", out)
 
-		wt := &Worktree{Path: wtDir, Branch: "feature/something"}
-		sess, err := mgr.ImportWorktree(repo, wt)
-		require.NoError(t, err)
-		assert.Equal(t, "gao-acme-app-feature-something", sess.ID)
-		assert.Equal(t, 0, sess.IssueNumber)
-		assert.Empty(t, sess.IssueRepo)
+		result, syncErr := mgr.SyncWorktrees()
+		require.NoError(t, syncErr)
+		assert.Equal(t, 1, result.Added)
+
+		// Find the new session (the cross-repo one from previous test still exists).
+		sessions := mgr.Sessions()
+		var bareSess *Session
+		for i := range sessions {
+			if sessions[i].Branch == "feature/bare" {
+				bareSess = &sessions[i]
+				break
+			}
+		}
+		require.NotNil(t, bareSess)
+		assert.Equal(t, "gao-acme-app-feature-bare", bareSess.ID)
+		assert.Equal(t, 0, bareSess.IssueNumber)
+		assert.Empty(t, bareSess.IssueRepo)
+	})
+}
+
+func TestBuildSessionName(t *testing.T) {
+	repo := &config.RepoConfig{Owner: "acme", Name: "app"}
+
+	t.Run("with issue same repo", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/wt", Branch: "claude/issue-42"}
+		assert.Equal(t, "gao-acme-app-42", buildSessionName(repo, wt, 42, "acme/app"))
 	})
 
-	t.Run("detached worktree", func(t *testing.T) {
-		wtDir := filepath.Join(t.TempDir(), "detached-abc")
-		require.NoError(t, os.MkdirAll(wtDir, 0o750))
-
-		wt := &Worktree{Path: wtDir, Branch: ""}
-		sess, err := mgr.ImportWorktree(repo, wt)
-		require.NoError(t, err)
-		assert.Equal(t, "gao-acme-app-detached-abc", sess.ID)
-		assert.Equal(t, 0, sess.IssueNumber)
+	t.Run("with issue cross repo", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/wt", Branch: "claude/issue-7"}
+		assert.Equal(t, "gao-acme-app-other-repo-7", buildSessionName(repo, wt, 7, "other/repo"))
 	})
 
-	t.Run("collision detection", func(t *testing.T) {
-		// Re-use the same worktree dir from "reads metadata file" test.
-		// Create a new worktree dir with the same issue to trigger collision.
-		wtDir := filepath.Join(t.TempDir(), "wt-42-dup")
-		require.NoError(t, os.MkdirAll(wtDir, 0o750))
-		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
-			IssueNumber: 42,
-			IssueRepo:   "acme/app",
-		}))
+	t.Run("no issue uses branch", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/wt", Branch: "feature/something"}
+		assert.Equal(t, "gao-acme-app-feature-something", buildSessionName(repo, wt, 0, ""))
+	})
 
-		wt := &Worktree{Path: wtDir, Branch: "claude/issue-42"}
-		_, err := mgr.ImportWorktree(repo, wt)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "already exists")
+	t.Run("no issue no branch uses path", func(t *testing.T) {
+		wt := &Worktree{Path: "/tmp/detached-abc", Branch: ""}
+		assert.Equal(t, "gao-acme-app-detached-abc", buildSessionName(repo, wt, 0, ""))
 	})
 }
