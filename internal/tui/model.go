@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -418,9 +419,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.spawnSession()
 			return m, cmd
 		}
-	case key.Matches(msg, m.keys.Attach):
+	case key.Matches(msg, m.keys.Worktree):
 		if m.activePanel == PanelSessions {
-			cmd := m.attachSession()
+			cmd := m.openWorktree()
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
@@ -814,70 +815,95 @@ func (m *Model) spawnSession() tea.Cmd {
 	}
 }
 
-func (m *Model) attachSession() tea.Cmd {
+// openWorktree opens a terminal window/tab at the session's worktree directory.
+func (m *Model) openWorktree() tea.Cmd {
 	sess := m.selectedSession()
 	if sess == nil {
 		return nil
 	}
 
 	workDir := sess.WorktreePath
-	spawnCmd := m.cfg.Spawn.Command
-	if spawnCmd == "" {
-		spawnCmd = "claude --dangerously-skip-permissions"
-	}
-
-	// Check if Warp is available and configured
-	useWarp := false
-	if m.cfg.Attach.UseWarp != nil {
-		useWarp = *m.cfg.Attach.UseWarp
-	} else {
-		// Auto-detect Warp
-		_, err := exec.LookPath("warp-cli")
-		useWarp = err == nil
-	}
-
 	dbg := m.debugLog
 	sessID := sess.ID
 
-	if useWarp {
-		return func() tea.Msg {
-			id := dbg.Start(fmt.Sprintf("Attaching to %s via Warp", sessID))
-			cmd := exec.CommandContext(context.Background(),
-				"warp-cli", "open-tab", "--",
-				"sh", "-c", "cd "+shellQuoteSession(workDir)+" && "+spawnCmd)
-			if err := cmd.Run(); err != nil {
-				dbg.Error(id, err)
-				return errMsg{err: fmt.Errorf("warp attach: %w", err)}
-			}
-			dbg.Finish(id, "")
-			return nil
+	// Use custom command if configured.
+	if tpl := m.cfg.Worktree.OpenCommand; tpl != "" {
+		return m.openWorktreeCommand(sessID, workDir, tpl)
+	}
+
+	// Auto-detect: tmux → Warp → interactive shell.
+	if os.Getenv("TMUX") != "" {
+		if _, err := exec.LookPath("tmux"); err == nil {
+			return m.openWorktreeTmux(sessID, workDir)
+		}
+	}
+	if os.Getenv("TERM_PROGRAM") == "WarpTerminal" {
+		if _, err := exec.LookPath("open"); err == nil {
+			return m.openWorktreeWarp(sessID, workDir)
 		}
 	}
 
-	// Launch the spawn command interactively in the session's worktree
-	attachCmd := m.resolveAttachCommand(workDir)
-	dbg.Info(fmt.Sprintf("Attaching to %s interactively", sessID))
-
+	// Fallback: open a shell interactively (suspends TUI).
+	dbg.Info(fmt.Sprintf("Opening worktree for %s interactively", sessID))
 	return tea.ExecProcess(
-		exec.CommandContext(context.Background(), "sh", "-c", attachCmd),
+		exec.CommandContext(context.Background(),
+			"sh", "-c", "cd "+shellQuoteSession(workDir)+" && exec \"${SHELL:-sh}\" -l"),
 		func(err error) tea.Msg {
 			if err != nil {
-				dbg.Infof("Attach to %s failed: %v", sessID, err)
-				return errMsg{err: fmt.Errorf("attach: %w", err)}
+				return errMsg{err: fmt.Errorf("open worktree: %w", err)}
 			}
-			dbg.Infof("Detached from %s", sessID)
 			return statusRefreshMsg{}
 		},
 	)
 }
 
-// resolveAttachCommand builds the attach command for a session's worktree directory.
-func (m *Model) resolveAttachCommand(workDir string) string {
-	spawnCmd := m.cfg.Spawn.Command
-	if spawnCmd == "" {
-		spawnCmd = "claude --dangerously-skip-permissions"
+func (m *Model) openWorktreeTmux(sessID, workDir string) tea.Cmd {
+	dbg := m.debugLog
+	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Opening worktree for %s via tmux", sessID))
+		cmd := exec.CommandContext(context.Background(),
+			"tmux", "new-window", "-n", sessID, "-c", workDir)
+		if err := cmd.Run(); err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("tmux open worktree: %w", err)}
+		}
+		dbg.Finish(id, "")
+		return nil
 	}
-	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
+}
+
+func (m *Model) openWorktreeWarp(sessID, workDir string) tea.Cmd {
+	dbg := m.debugLog
+	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Opening worktree for %s via Warp", sessID))
+		cmd := exec.CommandContext(context.Background(), "open", "-a", "Warp", workDir)
+		if err := cmd.Run(); err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("warp open worktree: %w", err)}
+		}
+		dbg.Finish(id, "")
+		return nil
+	}
+}
+
+func (m *Model) openWorktreeCommand(sessID, workDir, tpl string) tea.Cmd {
+	dbg := m.debugLog
+	if !strings.Contains(tpl, "{path}") {
+		return func() tea.Msg {
+			return errMsg{err: fmt.Errorf("worktree open_command is missing '{path}' placeholder")}
+		}
+	}
+	fullCmd := strings.ReplaceAll(tpl, "{path}", shellQuoteSession(workDir))
+	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Opening worktree for %s via custom command", sessID))
+		cmd := exec.CommandContext(context.Background(), "sh", "-c", fullCmd)
+		if err := cmd.Run(); err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("open worktree: %w", err)}
+		}
+		dbg.Finish(id, "")
+		return nil
+	}
 }
 
 func (m *Model) syncWorktrees() tea.Cmd {

@@ -42,12 +42,20 @@ spawn:
   # Default: "" (auto-detect)
   base_branch: ""
 
-# How to attach to a running session.
-attach:
-  # Force Warp tab behavior on/off. When unset (null), gao auto-detects
-  # Warp by checking if warp-cli is on PATH.
-  # Default: null (auto-detect)
-  use_warp: null
+# How "open worktree" (a key) navigates to a session's worktree directory.
+worktree:
+  # Custom shell command to open a terminal at a path.
+  # Use {path} as a placeholder for the worktree directory.
+  # When empty, gao auto-detects:
+  #   tmux ($TMUX set)          → tmux new-window -c {path}
+  #   Warp ($TERM_PROGRAM)      → open -a Warp {path}
+  #   fallback                  → login shell in the worktree path (suspends TUI)
+  # Examples:
+  #   "kitty --directory {path}"
+  #   "alacritty --working-directory {path}"
+  #   "gnome-terminal --working-directory={path}"
+  # Default: ""
+  open_command: ""
 
 # Bottom status bar. Can be populated by a custom script.
 status_bar:

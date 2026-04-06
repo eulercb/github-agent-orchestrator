@@ -12,14 +12,14 @@ import (
 
 // Config is the top-level configuration for gao.
 type Config struct {
-	ReposDir    string        `yaml:"repos_dir"`
-	TrackIssues bool          `yaml:"track_issues"`
-	IssueFilter string        `yaml:"issue_filter"`
-	Spawn       SpawnConfig   `yaml:"spawn"`
-	StatusBar   StatusBar     `yaml:"status_bar"`
-	Attach      AttachConfig  `yaml:"attach"`
-	CCUsage     CCUsageConfig `yaml:"ccusage"`
-	SessionDir  string        `yaml:"session_dir"`
+	ReposDir    string         `yaml:"repos_dir"`
+	TrackIssues bool           `yaml:"track_issues"`
+	IssueFilter string         `yaml:"issue_filter"`
+	Spawn       SpawnConfig    `yaml:"spawn"`
+	StatusBar   StatusBar      `yaml:"status_bar"`
+	Worktree    WorktreeConfig `yaml:"worktree"`
+	CCUsage     CCUsageConfig  `yaml:"ccusage"`
+	SessionDir  string         `yaml:"session_dir"`
 }
 
 // DefaultIssueFilter is the fallback issue filter used when no search query
@@ -38,9 +38,17 @@ type StatusBar struct {
 	Command string `yaml:"command"`
 }
 
-// AttachConfig controls how sessions are attached.
-type AttachConfig struct {
-	UseWarp *bool `yaml:"use_warp"`
+// WorktreeConfig controls how the "open worktree" action navigates to a
+// session's worktree directory.
+type WorktreeConfig struct {
+	// OpenCommand is a shell command template for opening a terminal at a path.
+	// Use {path} as a placeholder for the worktree directory.
+	// When empty, gao auto-detects:
+	//   tmux (if $TMUX is set)  → tmux new-window -c {path}
+	//   Warp (if $TERM_PROGRAM) → open -a Warp {path}
+	//   fallback                → login shell in the worktree path (suspends TUI)
+	// Example: "kitty --directory {path}"
+	OpenCommand string `yaml:"open_command"`
 }
 
 // CCUsageConfig configures optional ccusage integration.
@@ -62,7 +70,7 @@ func DefaultConfig() Config {
 		StatusBar: StatusBar{
 			Command: "",
 		},
-		Attach: AttachConfig{},
+		Worktree: WorktreeConfig{},
 		CCUsage: CCUsageConfig{
 			Enabled: false,
 			Command: "ccusage",

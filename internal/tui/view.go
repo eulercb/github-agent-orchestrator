@@ -505,7 +505,7 @@ func (m *Model) renderHelpBar() string {
 	case PanelIssues:
 		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "i hide issues", "d debug", "r refresh", "? help", "q quit"}
 	case PanelSessions:
-		items = []string{"↑↓ navigate", "a attach", "w scan", "o open PR", "O open issue", "x kill"}
+		items = []string{"↑↓ navigate", "a worktree", "w scan", "o open PR", "O open issue", "x kill"}
 		if m.showIssues {
 			items = append(items, "tab switch", "i hide issues")
 		} else {
@@ -533,7 +533,7 @@ func (m *Model) viewHelp() string {
   Actions:
     /            Edit issue filter (GitHub search syntax, in Issues panel)
     s            Spawn a new Claude Code session for selected issue
-    a            Attach to selected session (opens interactive Claude)
+    a            Open worktree directory in a new terminal
     w            Scan worktrees (discover new, remove stale)
     o            Open selected issue (Issues) or session PR (Sessions) in browser
     O            Open session's issue in browser (Sessions panel)
