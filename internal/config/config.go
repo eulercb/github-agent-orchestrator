@@ -38,9 +38,39 @@ type StatusBar struct {
 	Command string `yaml:"command"`
 }
 
+// AttachStrategy controls which method gao uses to open an attached session.
+type AttachStrategy string
+
+// Supported attach strategies.
+const (
+	// AttachAuto auto-detects the best strategy: tmux → Warp → interactive.
+	AttachAuto AttachStrategy = "auto"
+	// AttachTmux opens a new tmux window.
+	AttachTmux AttachStrategy = "tmux"
+	// AttachWarp opens a new Warp tab.
+	AttachWarp AttachStrategy = "warp"
+	// AttachCommand runs a user-defined command template.
+	AttachCommand AttachStrategy = "command"
+	// AttachInteractive suspends the TUI and runs inline (blocking).
+	AttachInteractive AttachStrategy = "interactive"
+)
+
 // AttachConfig controls how sessions are attached.
 type AttachConfig struct {
-	UseWarp *bool `yaml:"use_warp"`
+	// Strategy selects the attach method: "auto", "tmux", "warp", "command", "interactive".
+	// Default: "auto" (detect tmux → Warp → interactive).
+	Strategy AttachStrategy `yaml:"strategy"`
+
+	// Command is a shell command template used when strategy is "command".
+	// Use {cmd} as a placeholder for the full attach command
+	// (e.g. "cd /path && claude ...").
+	// Example: "gnome-terminal -- sh -c '{cmd}; exec bash'"
+	Command string `yaml:"command"`
+
+	// UseWarp is deprecated; use strategy: warp instead.
+	// Kept for backwards compatibility — when set and strategy is empty,
+	// it is migrated to the equivalent strategy.
+	UseWarp *bool `yaml:"use_warp,omitempty"`
 }
 
 // CCUsageConfig configures optional ccusage integration.
@@ -62,7 +92,9 @@ func DefaultConfig() Config {
 		StatusBar: StatusBar{
 			Command: "",
 		},
-		Attach: AttachConfig{},
+		Attach: AttachConfig{
+			Strategy: AttachAuto,
+		},
 		CCUsage: CCUsageConfig{
 			Enabled: false,
 			Command: "ccusage",

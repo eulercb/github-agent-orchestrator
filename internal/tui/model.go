@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -821,43 +822,117 @@ func (m *Model) attachSession() tea.Cmd {
 	}
 
 	workDir := sess.WorktreePath
+	attachCmd := m.resolveAttachCommand(workDir)
+	strategy := m.resolveAttachStrategy()
+	dbg := m.debugLog
+	sessID := sess.ID
+
+	switch strategy {
+	case config.AttachTmux:
+		return m.attachViaTmux(sessID, attachCmd)
+	case config.AttachWarp:
+		return m.attachViaWarp(sessID, attachCmd)
+	case config.AttachCommand:
+		return m.attachViaCommand(sessID, attachCmd)
+	default: // interactive
+		return m.attachInteractive(sessID, attachCmd, dbg)
+	}
+}
+
+// resolveAttachStrategy determines which attach method to use. It respects
+// explicit config, migrates the deprecated use_warp flag, and auto-detects
+// tmux / Warp when strategy is "auto" (or empty).
+func (m *Model) resolveAttachStrategy() config.AttachStrategy {
+	s := m.cfg.Attach.Strategy
+
+	// Migrate deprecated use_warp field.
+	if s == "" || s == config.AttachAuto {
+		if m.cfg.Attach.UseWarp != nil && *m.cfg.Attach.UseWarp {
+			return config.AttachWarp
+		}
+	}
+
+	if s != "" && s != config.AttachAuto {
+		return s
+	}
+
+	// Auto-detect: tmux → Warp → interactive.
+	if os.Getenv("TMUX") != "" {
+		if _, err := exec.LookPath("tmux"); err == nil {
+			return config.AttachTmux
+		}
+	}
+	if os.Getenv("TERM_PROGRAM") == "WarpTerminal" {
+		if _, err := exec.LookPath("warp-cli"); err == nil {
+			return config.AttachWarp
+		}
+	}
+	return config.AttachInteractive
+}
+
+// resolveAttachCommand builds the attach command for a session's worktree directory.
+func (m *Model) resolveAttachCommand(workDir string) string {
 	spawnCmd := m.cfg.Spawn.Command
 	if spawnCmd == "" {
 		spawnCmd = "claude --dangerously-skip-permissions"
 	}
+	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
+}
 
-	// Check if Warp is available and configured
-	useWarp := false
-	if m.cfg.Attach.UseWarp != nil {
-		useWarp = *m.cfg.Attach.UseWarp
-	} else {
-		// Auto-detect Warp
-		_, err := exec.LookPath("warp-cli")
-		useWarp = err == nil
-	}
-
+func (m *Model) attachViaTmux(sessID, attachCmd string) tea.Cmd {
 	dbg := m.debugLog
-	sessID := sess.ID
-
-	if useWarp {
-		return func() tea.Msg {
-			id := dbg.Start(fmt.Sprintf("Attaching to %s via Warp", sessID))
-			cmd := exec.CommandContext(context.Background(),
-				"warp-cli", "open-tab", "--",
-				"sh", "-c", "cd "+shellQuoteSession(workDir)+" && "+spawnCmd)
-			if err := cmd.Run(); err != nil {
-				dbg.Error(id, err)
-				return errMsg{err: fmt.Errorf("warp attach: %w", err)}
-			}
-			dbg.Finish(id, "")
-			return nil
+	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Attaching to %s via tmux", sessID))
+		cmd := exec.CommandContext(context.Background(),
+			"tmux", "new-window", "-n", sessID, "sh", "-c", attachCmd)
+		if err := cmd.Run(); err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("tmux attach: %w", err)}
 		}
+		dbg.Finish(id, "")
+		return nil
 	}
+}
 
-	// Launch the spawn command interactively in the session's worktree
-	attachCmd := m.resolveAttachCommand(workDir)
+func (m *Model) attachViaWarp(sessID, attachCmd string) tea.Cmd {
+	dbg := m.debugLog
+	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Attaching to %s via Warp", sessID))
+		cmd := exec.CommandContext(context.Background(),
+			"warp-cli", "open-tab", "--",
+			"sh", "-c", attachCmd)
+		if err := cmd.Run(); err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("warp attach: %w", err)}
+		}
+		dbg.Finish(id, "")
+		return nil
+	}
+}
+
+func (m *Model) attachViaCommand(sessID, attachCmd string) tea.Cmd {
+	dbg := m.debugLog
+	tpl := m.cfg.Attach.Command
+	if tpl == "" {
+		dbg.Info("attach strategy is 'command' but no command template configured, falling back to interactive")
+		return m.attachInteractive(sessID, attachCmd, dbg)
+	}
+	// Replace {cmd} placeholder with the actual attach command.
+	fullCmd := strings.ReplaceAll(tpl, "{cmd}", attachCmd)
+	return func() tea.Msg {
+		id := dbg.Start(fmt.Sprintf("Attaching to %s via custom command", sessID))
+		cmd := exec.CommandContext(context.Background(), "sh", "-c", fullCmd)
+		if err := cmd.Run(); err != nil {
+			dbg.Error(id, err)
+			return errMsg{err: fmt.Errorf("command attach: %w", err)}
+		}
+		dbg.Finish(id, "")
+		return nil
+	}
+}
+
+func (m *Model) attachInteractive(sessID, attachCmd string, dbg *debug.Log) tea.Cmd {
 	dbg.Info(fmt.Sprintf("Attaching to %s interactively", sessID))
-
 	return tea.ExecProcess(
 		exec.CommandContext(context.Background(), "sh", "-c", attachCmd),
 		func(err error) tea.Msg {
@@ -869,15 +944,6 @@ func (m *Model) attachSession() tea.Cmd {
 			return statusRefreshMsg{}
 		},
 	)
-}
-
-// resolveAttachCommand builds the attach command for a session's worktree directory.
-func (m *Model) resolveAttachCommand(workDir string) string {
-	spawnCmd := m.cfg.Spawn.Command
-	if spawnCmd == "" {
-		spawnCmd = "claude --dangerously-skip-permissions"
-	}
-	return "cd " + shellQuoteSession(workDir) + " && " + spawnCmd
 }
 
 func (m *Model) syncWorktrees() tea.Cmd {

@@ -44,10 +44,23 @@ spawn:
 
 # How to attach to a running session.
 attach:
-  # Force Warp tab behavior on/off. When unset (null), gao auto-detects
-  # Warp by checking if warp-cli is on PATH.
-  # Default: null (auto-detect)
-  use_warp: null
+  # Strategy for opening an attached session.
+  # "auto"        — detect tmux → Warp → interactive fallback
+  # "tmux"        — always open a new tmux window
+  # "warp"        — always open a new Warp tab
+  # "command"     — run a custom command template (see attach.command)
+  # "interactive" — suspend the TUI and run inline (blocking)
+  # Default: "auto"
+  strategy: auto
+
+  # Custom command template, used when strategy is "command".
+  # Use {cmd} as a placeholder for the full attach command.
+  # Examples:
+  #   "gnome-terminal -- sh -c '{cmd}; exec bash'"
+  #   "kitty sh -c '{cmd}'"
+  #   "alacritty -e sh -c '{cmd}'"
+  # Default: ""
+  command: ""
 
 # Bottom status bar. Can be populated by a custom script.
 status_bar:
