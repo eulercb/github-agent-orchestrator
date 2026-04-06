@@ -845,18 +845,39 @@ func (m *Model) attachSession() tea.Cmd {
 func (m *Model) resolveAttachStrategy() config.AttachStrategy {
 	s := m.cfg.Attach.Strategy
 
-	// Migrate deprecated use_warp field.
+	// Migrate deprecated use_warp field when strategy is unset or auto.
 	if s == "" || s == config.AttachAuto {
-		if m.cfg.Attach.UseWarp != nil && *m.cfg.Attach.UseWarp {
-			return config.AttachWarp
+		if m.cfg.Attach.UseWarp != nil {
+			if *m.cfg.Attach.UseWarp {
+				return config.AttachWarp
+			}
+			// use_warp: false — skip Warp in auto-detection, fall through
+			// to tmux → interactive.
+			return m.autoDetectNoWarp()
 		}
 	}
 
 	if s != "" && s != config.AttachAuto {
-		return s
+		if isValidStrategy(s) {
+			return s
+		}
+		m.debugLog.Infof("unknown attach strategy %q, falling back to auto", s)
 	}
 
 	// Auto-detect: tmux → Warp → interactive.
+	return m.autoDetect()
+}
+
+func isValidStrategy(s config.AttachStrategy) bool {
+	switch s {
+	case config.AttachAuto, config.AttachTmux, config.AttachWarp,
+		config.AttachCommand, config.AttachInteractive:
+		return true
+	}
+	return false
+}
+
+func (m *Model) autoDetect() config.AttachStrategy {
 	if os.Getenv("TMUX") != "" {
 		if _, err := exec.LookPath("tmux"); err == nil {
 			return config.AttachTmux
@@ -865,6 +886,15 @@ func (m *Model) resolveAttachStrategy() config.AttachStrategy {
 	if os.Getenv("TERM_PROGRAM") == "WarpTerminal" {
 		if _, err := exec.LookPath("warp-cli"); err == nil {
 			return config.AttachWarp
+		}
+	}
+	return config.AttachInteractive
+}
+
+func (m *Model) autoDetectNoWarp() config.AttachStrategy {
+	if os.Getenv("TMUX") != "" {
+		if _, err := exec.LookPath("tmux"); err == nil {
+			return config.AttachTmux
 		}
 	}
 	return config.AttachInteractive
@@ -915,6 +945,10 @@ func (m *Model) attachViaCommand(sessID, attachCmd string) tea.Cmd {
 	tpl := m.cfg.Attach.Command
 	if tpl == "" {
 		dbg.Info("attach strategy is 'command' but no command template configured, falling back to interactive")
+		return m.attachInteractive(sessID, attachCmd, dbg)
+	}
+	if !strings.Contains(tpl, "{cmd}") {
+		dbg.Info("attach command template is missing '{cmd}' placeholder, falling back to interactive")
 		return m.attachInteractive(sessID, attachCmd, dbg)
 	}
 	// Replace {cmd} placeholder with the actual attach command.

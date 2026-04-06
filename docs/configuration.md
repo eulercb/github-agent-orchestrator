@@ -55,12 +55,21 @@ attach:
 
   # Custom command template, used when strategy is "command".
   # Use {cmd} as a placeholder for the full attach command.
+  # Note: {cmd} may contain single quotes, so use double quotes around it.
   # Examples:
-  #   "gnome-terminal -- sh -c '{cmd}; exec bash'"
-  #   "kitty sh -c '{cmd}'"
-  #   "alacritty -e sh -c '{cmd}'"
+  #   "gnome-terminal -- sh -c \"{cmd}; exec bash\""
+  #   "kitty sh -c \"{cmd}\""
+  #   "alacritty -e sh -c \"{cmd}\""
   # Default: ""
   command: ""
+
+  # Deprecated: retained for backwards compatibility with older configs.
+  # When strategy is unset or "auto", gao still recognizes use_warp:
+  #   true  → prefer Warp
+  #   false → skip Warp in auto-detection
+  # If strategy is explicitly set to a non-"auto" value, strategy wins.
+  # Prefer using strategy: warp instead.
+  # use_warp: null
 
 # Bottom status bar. Can be populated by a custom script.
 status_bar:

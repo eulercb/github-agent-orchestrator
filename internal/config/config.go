@@ -64,12 +64,14 @@ type AttachConfig struct {
 	// Command is a shell command template used when strategy is "command".
 	// Use {cmd} as a placeholder for the full attach command
 	// (e.g. "cd /path && claude ...").
-	// Example: "gnome-terminal -- sh -c '{cmd}; exec bash'"
+	// Note: {cmd} may contain single quotes, so avoid wrapping it in
+	// single quotes in shell templates such as sh -c '...'.
+	// Example: "gnome-terminal -- sh -c \"{cmd}; exec bash\""
 	Command string `yaml:"command"`
 
 	// UseWarp is deprecated; use strategy: warp instead.
-	// Kept for backwards compatibility — when set and strategy is empty,
-	// it is migrated to the equivalent strategy.
+	// Kept for backwards compatibility — when set and strategy is empty
+	// or "auto", it is migrated to the equivalent strategy.
 	UseWarp *bool `yaml:"use_warp,omitempty"`
 }
 
