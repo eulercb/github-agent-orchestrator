@@ -309,7 +309,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		m.scanning = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
-			m.debugLog.Infof("Worktree sync failed: %v", msg.err)
 			return m, filterCmd
 		}
 		// Update discovered repos

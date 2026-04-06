@@ -78,6 +78,34 @@ func TestLogTrim(t *testing.T) {
 	}
 }
 
+func TestTrimPreservesRunningEvents(t *testing.T) {
+	l := NewLog()
+	// Start a running event, then flood with info events to trigger trim.
+	runningID := l.Start("long op")
+
+	for i := range maxEvents + 10 {
+		l.Info(fmt.Sprintf("filler %d", i))
+	}
+
+	// The running event should still be findable.
+	l.Finish(runningID, "done")
+
+	events := l.Events()
+	found := false
+	for i := range events {
+		if events[i].Message == "long op" {
+			if events[i].Status != StatusDone {
+				t.Errorf("expected running event to be finished, got status %d", events[i].Status)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("running event was evicted during trim")
+	}
+}
+
 func TestEventDuration(t *testing.T) {
 	evt := Event{
 		StartedAt: time.Now().Add(-2 * time.Second),

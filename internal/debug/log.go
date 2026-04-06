@@ -141,11 +141,22 @@ func (l *Log) Events() []Event {
 	return out
 }
 
-// trim removes oldest events when the buffer exceeds maxEvents.
+// trim removes oldest non-running events when the buffer exceeds maxEvents.
+// Running events are never evicted so that Finish/Error can always find them.
 // Must be called with l.mu held.
 func (l *Log) trim() {
-	if len(l.events) > maxEvents {
-		excess := len(l.events) - maxEvents
-		l.events = l.events[excess:]
+	for len(l.events) > maxEvents {
+		evicted := false
+		for i := range l.events {
+			if l.events[i].Status != StatusRunning {
+				l.events = append(l.events[:i], l.events[i+1:]...)
+				evicted = true
+				break
+			}
+		}
+		if !evicted {
+			// All events are running — nothing safe to evict.
+			break
+		}
 	}
 }

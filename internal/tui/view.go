@@ -59,7 +59,18 @@ func (m *Model) viewDashboard() string {
 		if debugHeight < 5 {
 			debugHeight = 5
 		}
+		// Clamp so main content keeps at least 2 rows.
+		maxDebug := contentHeight - 3 // 2 for content + 1 for separator
+		if maxDebug < 0 {
+			maxDebug = 0
+		}
+		if debugHeight > maxDebug {
+			debugHeight = maxDebug
+		}
 		contentHeight -= debugHeight + 1 // +1 for separator
+		if contentHeight < 1 {
+			contentHeight = 1
+		}
 	}
 
 	if m.showIssues {
@@ -466,15 +477,12 @@ func (m *Model) renderDebugEvent(evt *debug.Event) string {
 		if maxDetail < 10 {
 			maxDetail = 10
 		}
-		detailRunes := []rune(evt.Detail)
-		detailText := evt.Detail
-		if len(detailRunes) > maxDetail {
-			detailText = string(detailRunes[:maxDetail]) + "..."
-		}
+		detailText := ansi.Truncate(evt.Detail, maxDetail, "…")
 		detail = " " + styles.DebugDetail.Render(detailText)
 	}
 
-	return fmt.Sprintf("  %s %s %s%s%s", ts, icon, msg, durStr, detail)
+	line := fmt.Sprintf("  %s %s %s%s%s", ts, icon, msg, durStr, detail)
+	return ansi.Truncate(line, m.width, "…")
 }
 
 // formatDuration returns a human-readable compact duration string.
@@ -485,7 +493,9 @@ func formatDuration(d time.Duration) string {
 	case d < time.Minute:
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	default:
-		return fmt.Sprintf("%.0fm%.0fs", d.Minutes(), d.Seconds()-d.Minutes()*60)
+		minutes := d / time.Minute
+		seconds := (d % time.Minute) / time.Second
+		return fmt.Sprintf("%dm%ds", minutes, seconds)
 	}
 }
 
