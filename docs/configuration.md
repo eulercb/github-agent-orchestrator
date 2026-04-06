@@ -13,7 +13,7 @@ repos:
   - owner: eulercb
     name: my-project
     # Override the local clone path for this specific repo.
-    # If unset, falls back to repos_dir/<name>, then ~/<name>.
+    # If unset, falls back to repos_dir/<owner>/<name>, then ~/<name>.
     local_path: "/home/you/work/my-project"
     filters:
       assignee: "@me"          # GitHub username or "@me"
@@ -28,7 +28,7 @@ repos:
       assignee: "@me"
       state: open
 
-# Root directory where repos are cloned. Used as <repos_dir>/<repo.name>
+# Root directory where repos are cloned. Used as <repos_dir>/<owner>/<name>
 # when a repo doesn't have an explicit local_path.
 # Default: "" (falls back to ~/<name>)
 repos_dir: ""

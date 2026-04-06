@@ -142,12 +142,15 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 
 	// Persist issue metadata inside the worktree so that future imports
 	// can associate the worktree with the issue without relying on branch names.
+	// Only relevant in worktree mode — ImportWorktree only scans .worktrees/.
 	issueRepo := repo.IssueRepoFullName()
-	if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
-		IssueNumber: issueNumber,
-		IssueRepo:   issueRepo,
-	}); writeErr != nil && m.cfg.Spawn.UseWorktree {
-		return nil, fmt.Errorf("persist worktree metadata: %w", writeErr)
+	if m.cfg.Spawn.UseWorktree {
+		if writeErr := writeWorktreeMetadata(workDir, &worktreeMetadata{
+			IssueNumber: issueNumber,
+			IssueRepo:   issueRepo,
+		}); writeErr != nil {
+			return nil, fmt.Errorf("persist worktree metadata: %w", writeErr)
+		}
 	}
 
 	// Determine log file path
@@ -294,7 +297,7 @@ type worktreeMetadata struct {
 	IssueRepo   string `yaml:"issue_repo,omitempty"`
 }
 
-// metadataPath returns the path to the gao metadata file inside a worktree.
+// metadataFile is the relative path to the gao metadata file inside a worktree.
 const metadataFile = ".claude/gao.local.yaml"
 
 // writeWorktreeMetadata persists issue metadata into the worktree so that
@@ -352,7 +355,7 @@ func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, e
 	worktrees := parseWorktreeList(out)
 
 	// Normalize worktreeBase so path comparisons are reliable even when
-	// repos_dir is relative or contains symlinks.
+	// repos_dir is relative. Note: symlinks are not resolved.
 	worktreeBase, err := filepath.Abs(filepath.Join(repoDir, ".worktrees"))
 	if err != nil {
 		return nil, fmt.Errorf("resolve worktree base: %w", err)

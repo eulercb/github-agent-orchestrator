@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -167,6 +168,15 @@ func doInit() error {
 
 	if owner != "" && name != "" {
 		search := prompt(scanner, "Issue filter (GitHub search syntax)", config.DefaultSearch)
+
+		// Detect the parent of the current directory as default repos root.
+		var detectedReposDir string
+		if cwd, err := os.Getwd(); err == nil {
+			detectedReposDir = filepath.Dir(cwd)
+		}
+
+		reposDir := prompt(scanner, "Root directory for repos", detectedReposDir)
+		cfg.ReposDir = reposDir
 
 		repo := config.RepoConfig{
 			Owner: owner,
