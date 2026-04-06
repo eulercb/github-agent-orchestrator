@@ -232,6 +232,9 @@ func (m *Model) renderSessionsPanel(maxHeight int) string {
 	}
 
 	header := titleStyle.Render("Sessions")
+	if m.scanning {
+		header += styles.MutedText.Render(" (scanning worktrees...)")
+	}
 	var lines []string
 	lines = append(lines, header)
 

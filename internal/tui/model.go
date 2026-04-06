@@ -66,6 +66,7 @@ type Model struct {
 	sessionCursor int
 	statusBarText string
 	errorMsg      string
+	scanning      bool
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
@@ -119,6 +120,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		prCache:           make(map[string]*github.PullRequest),
 		repos:             repos,
 		errorMsg:          initErr,
+		scanning:          true, // Init() triggers syncWorktrees
 		issueFilter:       issueFilter,
 		filterInput:       ti,
 		cfgPath:           cfgPath,
@@ -275,6 +277,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		}
 		return m, filterCmd
 	case worktreesSyncedMsg:
+		m.scanning = false
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
 			return m, filterCmd
@@ -377,6 +380,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case key.Matches(msg, m.keys.ImportWorktrees):
+		m.scanning = true
 		cmd := m.syncWorktrees()
 		return m, cmd
 	case key.Matches(msg, m.keys.Open):
