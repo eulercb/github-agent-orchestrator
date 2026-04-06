@@ -779,6 +779,9 @@ func (m *Model) openSessionIssueBrowser() tea.Cmd {
 	if sess == nil {
 		return nil
 	}
+	if sess.IssueNumber <= 0 {
+		return nil
+	}
 	issueRepo := sess.IssueRepoName()
 	if issueRepo == "" {
 		return nil
