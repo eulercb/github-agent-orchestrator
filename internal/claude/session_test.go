@@ -178,7 +178,7 @@ func TestWorktreeMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("write and read", func(t *testing.T) {
-		meta := &worktreeMetadata{IssueNumber: 42, IssueRepo: "acme/app"}
+		meta := &worktreeMetadata{IssueNumber: 42, IssueRepo: "acme/app", IssueTitle: "Fix login bug"}
 		require.NoError(t, writeWorktreeMetadata(tmpDir, meta))
 
 		got, err := readWorktreeMetadata(tmpDir)
@@ -186,6 +186,7 @@ func TestWorktreeMetadata(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Equal(t, 42, got.IssueNumber)
 		assert.Equal(t, "acme/app", got.IssueRepo)
+		assert.Equal(t, "Fix login bug", got.IssueTitle)
 	})
 
 	t.Run("read missing file", func(t *testing.T) {

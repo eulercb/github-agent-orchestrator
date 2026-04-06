@@ -238,7 +238,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
-		m.prCache = msg.prs
+		// Merge into existing cache so transient failures don't wipe
+		// previously resolved PRs.
+		for k, v := range msg.prs {
+			m.prCache[k] = v
+		}
 		return m, filterCmd
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()

@@ -374,11 +374,10 @@ func runGH(args ...string) ([]byte, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr := strings.TrimSpace(string(exitErr.Stderr))
 			if stderr != "" {
-				return nil, fmt.Errorf("gh %s: %s", args[0], stderr)
+				return nil, fmt.Errorf("gh %s: %s: %w", args[0], stderr, err)
 			}
-			return nil, fmt.Errorf("gh %s: %w", args[0], err)
 		}
-		return nil, err
+		return nil, fmt.Errorf("gh %s: %w", args[0], err)
 	}
 	return out, nil
 }
