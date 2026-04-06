@@ -12,108 +12,23 @@ import (
 
 // Config is the top-level configuration for gao.
 type Config struct {
-	Repos      []RepoConfig  `yaml:"repos"`
-	ReposDir   string        `yaml:"repos_dir"`
-	Spawn      SpawnConfig   `yaml:"spawn"`
-	StatusBar  StatusBar     `yaml:"status_bar"`
-	Attach     AttachConfig  `yaml:"attach"`
-	CCUsage    CCUsageConfig `yaml:"ccusage"`
-	SessionDir string        `yaml:"session_dir"`
+	ReposDir    string        `yaml:"repos_dir"`
+	IssueFilter string        `yaml:"issue_filter"`
+	PRFilter    string        `yaml:"pr_filter"`
+	Spawn       SpawnConfig   `yaml:"spawn"`
+	StatusBar   StatusBar     `yaml:"status_bar"`
+	Attach      AttachConfig  `yaml:"attach"`
+	CCUsage     CCUsageConfig `yaml:"ccusage"`
+	SessionDir  string        `yaml:"session_dir"`
 }
 
-// RepoConfig describes a GitHub repository and its issue filters.
-type RepoConfig struct {
-	Owner       string       `yaml:"owner"`
-	Name        string       `yaml:"name"`
-	LocalPath   string       `yaml:"local_path,omitempty"`
-	IssueSource *IssueSource `yaml:"issue_source,omitempty"`
-	Filters     IssueFilters `yaml:"filters"`
-}
-
-// IssueSource specifies a different repository from which to fetch issues.
-// When set, issues are fetched from this repo instead of the main repo.
-type IssueSource struct {
-	Owner string `yaml:"owner"`
-	Name  string `yaml:"name"`
-}
-
-// FullName returns "owner/name" for the PR/session repo.
-func (r *RepoConfig) FullName() string {
-	return r.Owner + "/" + r.Name
-}
-
-// IssueRepoFullName returns the repo to fetch issues from.
-// If IssueSource is configured, non-empty fields override the main repo;
-// otherwise it falls back to the main repo.
-func (r *RepoConfig) IssueRepoFullName() string {
-	if r.IssueSource == nil {
-		return r.FullName()
-	}
-
-	owner := r.Owner
-	name := r.Name
-
-	if r.IssueSource.Owner != "" {
-		owner = r.IssueSource.Owner
-	}
-	if r.IssueSource.Name != "" {
-		name = r.IssueSource.Name
-	}
-
-	return owner + "/" + name
-}
-
-// expandTilde replaces a leading "~/" or bare "~" in a path with the user's
-// home directory. Go's filepath functions do not perform shell-style tilde
-// expansion, so this must be done explicitly.
-func expandTilde(path string) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("determine user home directory: %w", err)
-		}
-		return filepath.Join(home, path[1:]), nil
-	}
-	return path, nil
-}
-
-// RepoLocalDir resolves the local filesystem path for a repository.
-// Resolution order:
-//  1. repo.LocalPath (per-repo override)
-//  2. config.ReposDir/<repo.Name> (global repos root)
-//  3. ~/<repo.Name> (fallback)
-//
-// Leading "~/" in LocalPath and ReposDir is expanded to the user's home
-// directory.
-func (c *Config) RepoLocalDir(repo *RepoConfig) (string, error) {
-	if repo.LocalPath != "" {
-		return expandTilde(repo.LocalPath)
-	}
-	if c.ReposDir != "" {
-		expanded, err := expandTilde(c.ReposDir)
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(expanded, repo.Name), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("determine user home directory: %w", err)
-	}
-	return filepath.Join(home, repo.Name), nil
-}
-
-// DefaultSearch is the fallback issue filter used when no search query
+// DefaultIssueFilter is the fallback issue filter used when no search query
 // is configured. It shows open issues assigned to the current user.
-const DefaultSearch = "is:open assignee:@me"
+const DefaultIssueFilter = "is:open assignee:@me"
 
-// IssueFilters controls which issues are shown.
-// Search is passed to "gh search issues" and supports the full GitHub
-// search syntax (e.g. "is:open assignee:@me repo:org/repo label:bug").
-// When empty, DefaultSearch is used.
-type IssueFilters struct {
-	Search string `yaml:"search"`
-}
+// DefaultPRFilter is the fallback PR filter used when no search query
+// is configured. It shows open PRs authored by the current user.
+const DefaultPRFilter = "is:open author:@me"
 
 // SpawnConfig controls how Claude Code sessions are created.
 type SpawnConfig struct {
@@ -141,7 +56,8 @@ type CCUsageConfig struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		Repos: []RepoConfig{},
+		IssueFilter: DefaultIssueFilter,
+		PRFilter:    DefaultPRFilter,
 		Spawn: SpawnConfig{
 			Command:     "claude --dangerously-skip-permissions",
 			UseWorktree: true,
@@ -157,6 +73,29 @@ func DefaultConfig() Config {
 		},
 		SessionDir: "",
 	}
+}
+
+// expandTilde replaces a leading "~/" or bare "~" in a path with the user's
+// home directory. Go's filepath functions do not perform shell-style tilde
+// expansion, so this must be done explicitly.
+func expandTilde(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("determine user home directory: %w", err)
+		}
+		return filepath.Join(home, path[1:]), nil
+	}
+	return path, nil
+}
+
+// ExpandReposDir resolves the repos directory path, expanding tildes.
+// Returns an error if repos_dir is not configured.
+func (c *Config) ExpandReposDir() (string, error) {
+	if c.ReposDir == "" {
+		return "", fmt.Errorf("repos_dir not configured")
+	}
+	return expandTilde(c.ReposDir)
 }
 
 // Dir returns the config directory path (~/.config/gao).

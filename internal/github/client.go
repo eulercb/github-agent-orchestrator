@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/eulercb/github-agent-orchestrator/internal/config"
 )
 
 // Issue represents a GitHub issue.
@@ -80,7 +78,7 @@ func NewClient() *Client {
 func (c *Client) ListIssues(search string) ([]Issue, error) {
 	query := search
 	if query == "" {
-		query = config.DefaultSearch
+		query = "is:open assignee:@me"
 	}
 	if !hasTypeQualifier(query) {
 		query = "is:issue " + query

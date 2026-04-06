@@ -15,6 +15,7 @@ import (
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
+	"github.com/eulercb/github-agent-orchestrator/internal/repo"
 	"github.com/eulercb/github-agent-orchestrator/internal/statusbar"
 )
 
@@ -40,8 +41,8 @@ const (
 )
 
 // prCacheKey builds a unique key for the PR cache from repo and branch.
-func prCacheKey(repo, branch string) string {
-	return repo + ":" + branch
+func prCacheKey(repoName, branch string) string {
+	return repoName + ":" + branch
 }
 
 // Model is the top-level Bubble Tea model.
@@ -54,6 +55,9 @@ type Model struct {
 	width, height int
 	cfgPath       string
 
+	// Discovered repos (refreshed on sync)
+	repos []repo.Repo
+
 	// State
 	currentView   View
 	activePanel   Panel
@@ -63,12 +67,12 @@ type Model struct {
 	issuesCursor  int
 	sessionCursor int
 	prCursor      int
-	repoIndex     int
 	statusBarText string
 	errorMsg      string
 	confirmMsg    string
 	confirmAction func() tea.Msg
 	loading       bool
+	issueFilter   string
 	prFilter      string
 	filterInput   textinput.Model
 }
@@ -76,22 +80,33 @@ type Model struct {
 // NewModel creates the initial TUI model.
 func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manager) Model {
 	// Build the status bar provider with the built-in fallback.
-	// The command comes from config; refresh runs async via refreshStatusBar().
 	sbCmd := cfg.StatusBar.Command
 	if sbCmd == "" && cfg.CCUsage.Enabled && cfg.CCUsage.Command != "" {
 		sbCmd = cfg.CCUsage.Command
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = config.DefaultSearch
+	ti.Placeholder = config.DefaultIssueFilter
 	ti.CharLimit = 256
 
-	// Pre-populate with the current search filter from config.
-	if len(cfg.Repos) > 0 {
-		ti.SetValue(cfg.Repos[0].Filters.Search)
+	issueFilter := cfg.IssueFilter
+	if issueFilter == "" {
+		issueFilter = config.DefaultIssueFilter
 	}
+	prFilter := cfg.PRFilter
+
+	ti.SetValue(issueFilter)
 
 	cfgPath, _ := config.Path()
+
+	// Discover repos at startup
+	var repos []repo.Repo
+	var initErr string
+	if discovered, err := sessMgr.DiscoverRepos(); err != nil {
+		initErr = fmt.Sprintf("Repo discovery failed: %v", err)
+	} else {
+		repos = discovered
+	}
 
 	return Model{
 		cfg:         cfg,
@@ -100,6 +115,10 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		statusProv:  statusbar.NewProvider(sbCmd, nil),
 		keys:        DefaultKeyMap(),
 		prCache:     make(map[string]*github.PullRequest),
+		repos:       repos,
+		errorMsg:    initErr,
+		issueFilter: issueFilter,
+		prFilter:    prFilter,
 		filterInput: ti,
 		cfgPath:     cfgPath,
 	}
@@ -141,6 +160,7 @@ type sessionKilledMsg struct {
 type worktreesSyncedMsg struct {
 	added   int
 	removed int
+	repos   []repo.Repo
 	err     error
 }
 
@@ -271,6 +291,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 			m.errorMsg = fmt.Sprintf("Worktree sync failed: %v", msg.err)
 			return m, filterCmd
 		}
+		// Update discovered repos
+		if msg.repos != nil {
+			m.repos = msg.repos
+		}
 		if msg.added > 0 || msg.removed > 0 {
 			var parts []string
 			if msg.added > 0 {
@@ -398,13 +422,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Populate the editor with the current filter for the active panel.
 		switch m.activePanel {
 		case PanelPRs:
+			m.filterInput.Placeholder = config.DefaultPRFilter
 			m.filterInput.SetValue(m.prFilter)
 		default:
-			if repo := m.currentRepo(); repo != nil {
-				m.filterInput.SetValue(repo.Filters.Search)
-			} else {
-				m.filterInput.SetValue("")
-			}
+			m.filterInput.Placeholder = config.DefaultIssueFilter
+			m.filterInput.SetValue(m.issueFilter)
 		}
 		m.filterInput.Focus()
 		return m, m.filterInput.Cursor.BlinkCmd()
@@ -413,9 +435,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateFilter handles all messages while the filter editor is active.
-// Enter applies the filter, Esc cancels, window resizes update width,
-// and everything else (including cursor blink) is forwarded to the
-// textinput so it stays functional.
 func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -434,10 +453,7 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.fetchPRList()
 				return m, cmd
 			}
-			repo := m.currentRepo()
-			if repo != nil {
-				repo.Filters.Search = query
-			}
+			m.issueFilter = query
 			m.issuesCursor = 0
 			cmd := m.fetchIssues()
 			return m, cmd
@@ -447,8 +463,8 @@ func (m *Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Blur()
 			if m.activePanel == PanelPRs {
 				m.filterInput.SetValue(m.prFilter)
-			} else if repo := m.currentRepo(); repo != nil {
-				m.filterInput.SetValue(repo.Filters.Search)
+			} else {
+				m.filterInput.SetValue(m.issueFilter)
 			}
 			return m, nil
 		}
@@ -509,13 +525,6 @@ func (m *Model) moveCursor(delta int) {
 	}
 }
 
-func (m *Model) currentRepo() *config.RepoConfig {
-	if m.repoIndex < len(m.cfg.Repos) {
-		return &m.cfg.Repos[m.repoIndex]
-	}
-	return nil
-}
-
 func (m *Model) selectedIssue() *github.Issue {
 	if m.issuesCursor >= 0 && m.issuesCursor < len(m.issues) {
 		return &m.issues[m.issuesCursor]
@@ -538,12 +547,26 @@ func (m *Model) selectedPR() *github.PullRequest {
 	return nil
 }
 
-func (m *Model) findSessionByRepoBranch(repo, branch string) *claude.Session {
+func (m *Model) findSessionByRepoBranch(repoName, branch string) *claude.Session {
 	sessions := m.sessions.Sessions()
 	for i := range sessions {
-		if sessions[i].Repo == repo && sessions[i].Branch == branch {
+		if sessions[i].Repo == repoName && sessions[i].Branch == branch {
 			return &sessions[i]
 		}
+	}
+	return nil
+}
+
+// findRepoForIssue finds the discovered repo that matches the issue's repository.
+func (m *Model) findRepoForIssue(issueRepo string) *repo.Repo {
+	for i := range m.repos {
+		if m.repos[i].FullName() == issueRepo {
+			return &m.repos[i]
+		}
+	}
+	// Fall back to first discovered repo if we only have one.
+	if len(m.repos) == 1 {
+		return &m.repos[0]
 	}
 	return nil
 }
@@ -551,27 +574,24 @@ func (m *Model) findSessionByRepoBranch(repo, branch string) *claude.Session {
 // Commands
 
 func (m *Model) fetchIssues() tea.Cmd {
+	search := m.issueFilter
 	return func() tea.Msg {
-		repo := m.currentRepo()
-		if repo == nil {
-			return issuesLoadedMsg{err: fmt.Errorf("no repos configured")}
-		}
-		issues, err := m.gh.ListIssues(repo.Filters.Search)
+		issues, err := m.gh.ListIssues(search)
 		return issuesLoadedMsg{issues: issues, err: err}
 	}
 }
 
 func (m *Model) fetchPRList() tea.Cmd {
 	search := m.prFilter
-	var repos []string
-	for i := range m.cfg.Repos {
-		repos = append(repos, m.cfg.Repos[i].FullName())
+	var repoNames []string
+	for i := range m.repos {
+		repoNames = append(repoNames, m.repos[i].FullName())
 	}
 	return func() tea.Msg {
-		if len(repos) == 0 {
-			return prListLoadedMsg{err: fmt.Errorf("no repos configured")}
+		if len(repoNames) == 0 {
+			return prListLoadedMsg{err: fmt.Errorf("no repos discovered in repos_dir")}
 		}
-		prs, err := m.gh.ListPRs(repos, search)
+		prs, err := m.gh.ListPRs(repoNames, search)
 		return prListLoadedMsg{prs: prs, err: err}
 	}
 }
@@ -607,18 +627,29 @@ func (m *Model) refreshStatuses() tea.Cmd {
 
 func (m *Model) spawnSession() tea.Cmd {
 	issue := m.selectedIssue()
-	repo := m.currentRepo()
-	if issue == nil || repo == nil {
+	if issue == nil {
 		return nil
 	}
 
-	// Use the issue's own repo when available (search results carry it).
+	if len(m.repos) == 0 {
+		m.errorMsg = "No repos discovered in repos_dir"
+		return nil
+	}
+
+	// Determine which issue repo this belongs to.
 	issueRepo := issue.Repository.NameWithOwner
-	if issueRepo == "" {
-		issueRepo = repo.IssueRepoFullName()
+
+	// Find the target repo for spawning (where the session/PR will live).
+	r := m.findRepoForIssue(issueRepo)
+	if r == nil {
+		m.errorMsg = fmt.Sprintf("No local repo found for %s", issueRepo)
+		return nil
 	}
 
 	// Check if session already exists for this issue
+	if issueRepo == "" {
+		issueRepo = r.FullName()
+	}
 	existing := m.sessions.FindByIssue(issueRepo, issue.Number)
 	if existing != nil {
 		m.errorMsg = fmt.Sprintf("Session already exists for issue #%d", issue.Number)
@@ -627,22 +658,10 @@ func (m *Model) spawnSession() tea.Cmd {
 
 	issueNum := issue.Number
 	issueTitle := issue.Title
-	repoCopy := *repo
-
-	// Override issue source so the session records the issue's actual repo,
-	// not the default config repo (matters for cross-repo search results).
-	if issueRepo != repo.IssueRepoFullName() {
-		parts := strings.SplitN(issueRepo, "/", 2)
-		if len(parts) == 2 {
-			repoCopy.IssueSource = &config.IssueSource{
-				Owner: parts[0],
-				Name:  parts[1],
-			}
-		}
-	}
+	repoCopy := *r
 
 	return func() tea.Msg {
-		sess, err := m.sessions.SpawnSession(&repoCopy, issueNum, issueTitle)
+		sess, err := m.sessions.SpawnSession(&repoCopy, issueRepo, issueNum, issueTitle)
 		return sessionSpawnedMsg{session: sess, err: err}
 	}
 }
@@ -711,7 +730,9 @@ func (m *Model) syncWorktrees() tea.Cmd {
 		if err != nil {
 			return worktreesSyncedMsg{err: err}
 		}
-		return worktreesSyncedMsg{added: result.Added, removed: result.Removed}
+		// Re-discover repos after sync so the list stays current.
+		repos, _ := sessMgr.DiscoverRepos()
+		return worktreesSyncedMsg{added: result.Added, removed: result.Removed, repos: repos}
 	}
 }
 
@@ -722,14 +743,14 @@ func (m *Model) openInBrowser() tea.Cmd {
 		if issue == nil {
 			return nil
 		}
-		repo := issue.Repository.NameWithOwner
-		if repo == "" {
-			repo = m.currentRepo().IssueRepoFullName()
+		issueRepo := issue.Repository.NameWithOwner
+		if issueRepo == "" {
+			return nil
 		}
 		number := issue.Number
 		ghClient := m.gh
 		return func() tea.Msg {
-			return openBrowserMsg{err: ghClient.OpenInBrowser(repo, number)}
+			return openBrowserMsg{err: ghClient.OpenInBrowser(issueRepo, number)}
 		}
 	case PanelSessions:
 		sess := m.selectedSession()
@@ -738,11 +759,11 @@ func (m *Model) openInBrowser() tea.Cmd {
 		}
 		pr, ok := m.prCache[prCacheKey(sess.Repo, sess.Branch)]
 		if ok && pr != nil {
-			repo := sess.Repo
+			repoName := sess.Repo
 			number := pr.Number
 			ghClient := m.gh
 			return func() tea.Msg {
-				return openBrowserMsg{err: ghClient.OpenInBrowser(repo, number)}
+				return openBrowserMsg{err: ghClient.OpenInBrowser(repoName, number)}
 			}
 		}
 	case PanelPRs:
@@ -751,11 +772,6 @@ func (m *Model) openInBrowser() tea.Cmd {
 			return nil
 		}
 		repoName := pr.Repository.NameWithOwner
-		if repoName == "" {
-			if repo := m.currentRepo(); repo != nil {
-				repoName = repo.FullName()
-			}
-		}
 		if repoName == "" {
 			return nil
 		}
@@ -789,11 +805,6 @@ func (m *Model) clearSessionForPR() {
 		return
 	}
 	repoName := pr.Repository.NameWithOwner
-	if repoName == "" {
-		if repo := m.currentRepo(); repo != nil {
-			repoName = repo.FullName()
-		}
-	}
 
 	sess := m.findSessionByRepoBranch(repoName, pr.HeadRef)
 	if sess == nil {
@@ -815,8 +826,6 @@ func (m *Model) refreshStatusBar() tea.Cmd {
 	sessions := m.sessions.Sessions()
 
 	return func() tea.Msg {
-		// Try the external status bar provider first (custom command or ccusage).
-		// This may shell out, so it runs async to avoid blocking the event loop.
 		if prov != nil {
 			prov.Refresh()
 			if text := prov.Text(); text != "" {

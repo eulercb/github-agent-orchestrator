@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
+	"github.com/eulercb/github-agent-orchestrator/internal/repo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -216,10 +217,12 @@ func TestWorktreeMetadata(t *testing.T) {
 	})
 }
 
-// initTestGitRepo creates a git repo with an initial commit and returns its path.
-func initTestGitRepo(t *testing.T) string {
+// initTestGitRepoInDir creates a git repo with an initial commit in the given
+// directory name under parentDir and returns its absolute path.
+func initTestGitRepoInDir(t *testing.T, parentDir, name string) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(parentDir, name)
+	require.NoError(t, os.MkdirAll(dir, 0o750))
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.CommandContext(context.Background(), "git", args...)
@@ -234,12 +237,15 @@ func initTestGitRepo(t *testing.T) string {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0o600))
 	run("add", ".")
 	run("commit", "-m", "initial")
+	// Set a fake GitHub remote so repo discovery can parse owner/name.
+	run("remote", "add", "origin", "https://github.com/acme/"+name+".git")
 	return dir
 }
 
 func TestSyncWorktrees(t *testing.T) {
-	repoDir := initTestGitRepo(t)
+	reposDir := t.TempDir()
 	stateDir := t.TempDir()
+	repoDir := initTestGitRepoInDir(t, reposDir, "app")
 
 	// Create a worktree inside the repo.
 	wtPath := filepath.Join(repoDir, ".worktrees", "claude-issue-42")
@@ -255,9 +261,7 @@ func TestSyncWorktrees(t *testing.T) {
 	}))
 
 	cfg := &config.Config{
-		Repos: []config.RepoConfig{
-			{Owner: "acme", Name: "app", LocalPath: repoDir},
-		},
+		ReposDir:   reposDir,
 		SessionDir: stateDir,
 	}
 
@@ -352,25 +356,25 @@ func TestSyncWorktrees(t *testing.T) {
 }
 
 func TestBuildSessionName(t *testing.T) {
-	repo := &config.RepoConfig{Owner: "acme", Name: "app"}
+	r := &repo.Repo{Owner: "acme", Name: "app", LocalPath: "/tmp/app"}
 
 	t.Run("with issue same repo", func(t *testing.T) {
 		wt := &Worktree{Path: "/tmp/wt", Branch: "claude/issue-42"}
-		assert.Equal(t, "gao-acme-app-42", buildSessionName(repo, wt, 42, "acme/app"))
+		assert.Equal(t, "gao-acme-app-42", buildSessionName(r, wt, 42, "acme/app"))
 	})
 
 	t.Run("with issue cross repo", func(t *testing.T) {
 		wt := &Worktree{Path: "/tmp/wt", Branch: "claude/issue-7"}
-		assert.Equal(t, "gao-acme-app-other-repo-7", buildSessionName(repo, wt, 7, "other/repo"))
+		assert.Equal(t, "gao-acme-app-other-repo-7", buildSessionName(r, wt, 7, "other/repo"))
 	})
 
 	t.Run("no issue uses branch", func(t *testing.T) {
 		wt := &Worktree{Path: "/tmp/wt", Branch: "feature/something"}
-		assert.Equal(t, "gao-acme-app-feature-something", buildSessionName(repo, wt, 0, ""))
+		assert.Equal(t, "gao-acme-app-feature-something", buildSessionName(r, wt, 0, ""))
 	})
 
 	t.Run("no issue no branch uses path", func(t *testing.T) {
 		wt := &Worktree{Path: "/tmp/detached-abc", Branch: ""}
-		assert.Equal(t, "gao-acme-app-detached-abc", buildSessionName(repo, wt, 0, ""))
+		assert.Equal(t, "gao-acme-app-detached-abc", buildSessionName(r, wt, 0, ""))
 	})
 }

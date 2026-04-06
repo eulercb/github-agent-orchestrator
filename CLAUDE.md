@@ -20,6 +20,7 @@ go run ./cmd/gao  # run locally
 ```
 cmd/gao/main.go           Entry point, subcommands (version, init, help)
 internal/config/           YAML config at ~/.config/gao/config.yaml
+internal/repo/             Auto-discover git repos under repos_dir, parse GitHub remotes
 internal/github/           gh CLI wrapper (issues, PRs, browser open)
 internal/process/          Background process management (start, monitor, kill, log capture)
 internal/claude/           Session lifecycle, spawn, status detection
@@ -38,7 +39,7 @@ See `docs/architecture.md` for full data flow, package graph, and design decisio
 - **No global state**: all state flows through structs, no `init()` functions
 - **External tools**: wrapped in dedicated packages under `internal/`, called via `exec.CommandContext` (not `exec.Command`), parse structured output (JSON, tab-delimited)
 - **TUI pattern**: Bubble Tea `Init/Update/View` cycle. Messages are types, commands are `tea.Cmd` producers. No side effects in `View()`. Value receivers on `Init`/`Update`/`View` with `//nolint:gocritic` (required by `tea.Model` interface)
-- **Pointer receivers**: use pointer receivers/params for structs > 24 bytes to satisfy gocritic's `hugeParam` check (`Config`, `RepoConfig`, `Issue`, `Session`, `Model`)
+- **Pointer receivers**: use pointer receivers/params for structs > 24 bytes to satisfy gocritic's `hugeParam` check (`Config`, `Repo`, `Issue`, `Session`, `Model`)
 - **File permissions**: dirs `0o750`, files `0o600` (gosec G301/G306)
 - **Shell quoting**: use `shellQuote()` for values interpolated into shell commands
 - **UTF-8 safety**: truncate strings by `[]rune`, not byte index
@@ -59,7 +60,6 @@ These caused CI failures and are easy to hit again:
 ## Open issues to be aware of
 
 - **#1 - Better status detection + performance**: Includes async `RefreshStatuses()` and parallel `fetchPRs()` work
-- **#2 - Multi-repo switching**: Config supports multiple repos but TUI only shows first
 - **#3 - Pass issue body as initial prompt**: Agent starts with no context currently
 - **#4 - Worktree cleanup for merged PRs**: Sessions and worktrees linger after PR merge
 

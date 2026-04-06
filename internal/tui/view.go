@@ -77,17 +77,14 @@ func (m *Model) viewDashboard() string {
 }
 
 func (m *Model) renderTitleBar() string {
-	repoName := "(no repo configured)"
-	if repo := m.currentRepo(); repo != nil {
-		repoName = repo.FullName()
-		issueRepo := repo.IssueRepoFullName()
-		if issueRepo != repo.FullName() {
-			repoName = fmt.Sprintf("%s (issues: %s)", repoName, issueRepo)
-		}
-	}
-
 	left := styles.TitleBar.Render(" gao ")
-	right := styles.TitleBar.Render(fmt.Sprintf(" %s ", repoName))
+
+	// Show repos_dir on the right
+	reposInfo := m.cfg.ReposDir
+	if reposInfo == "" {
+		reposInfo = "(no repos_dir)"
+	}
+	right := styles.TitleBar.Render(fmt.Sprintf(" %s ", reposInfo))
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {
 		gap = 0
@@ -108,11 +105,12 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	if m.loading {
 		header += styles.MutedText.Render(" (loading...)")
 	}
-	if repo := m.currentRepo(); repo != nil {
-		filterText := repo.Filters.Search
-		if filterText == "" {
-			filterText = config.DefaultSearch
-		}
+
+	filterText := m.issueFilter
+	if filterText == "" {
+		filterText = config.DefaultIssueFilter
+	}
+	if filterText != "" {
 		// Reserve space for "  / " prefix (4) + "..." suffix (3) + margin (1).
 		maxFilterLen := m.width - lipgloss.Width(header) - 8
 		if maxFilterLen < 0 {
@@ -176,14 +174,7 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 }
 
 func (m *Model) renderIssueLine(issue *github.Issue, selected, multiRepo bool) string {
-	// Determine the issue's repo for session lookup.
-	// Search results carry their own Repository; fall back to the config repo.
 	issueRepo := issue.Repository.NameWithOwner
-	if issueRepo == "" {
-		if repo := m.currentRepo(); repo != nil {
-			issueRepo = repo.IssueRepoFullName()
-		}
-	}
 
 	hasSession := false
 	if issueRepo != "" {
@@ -411,11 +402,6 @@ func (m *Model) renderPRListLine(pr *github.PullRequest, selected, multiRepo boo
 	// Session indicator
 	indicator := "  "
 	repoName := pr.Repository.NameWithOwner
-	if repoName == "" {
-		if repo := m.currentRepo(); repo != nil {
-			repoName = repo.FullName()
-		}
-	}
 	if repoName != "" {
 		if sess := m.findSessionByRepoBranch(repoName, pr.HeadRef); sess != nil {
 			indicator = "● "
