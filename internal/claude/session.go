@@ -120,13 +120,9 @@ func (m *Manager) SpawnSession(repo *config.RepoConfig, issueNumber int, issueTi
 	}
 	m.mu.RUnlock()
 
-	repoDir := m.cfg.Spawn.RepoDir
-	if repoDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("determine user home directory: %w", err)
-		}
-		repoDir = filepath.Join(home, repo.Name)
+	repoDir, err := m.cfg.RepoLocalDir(repo)
+	if err != nil {
+		return nil, err
 	}
 
 	// Set up git worktree or branch
@@ -340,13 +336,9 @@ func readWorktreeMetadata(worktreePath string) (*worktreeMetadata, error) {
 // directory that are not yet associated with any session. These follow the
 // Claude Code worktree convention and can be imported as sessions.
 func (m *Manager) ListUntrackedWorktrees(repo *config.RepoConfig) ([]Worktree, error) {
-	repoDir := m.cfg.Spawn.RepoDir
-	if repoDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("determine user home directory: %w", err)
-		}
-		repoDir = filepath.Join(home, repo.Name)
+	repoDir, err := m.cfg.RepoLocalDir(repo)
+	if err != nil {
+		return nil, err
 	}
 
 	out, err := gitRun(repoDir, "worktree", "list", "--porcelain")

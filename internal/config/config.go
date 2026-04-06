@@ -12,6 +12,7 @@ import (
 // Config is the top-level configuration for gao.
 type Config struct {
 	Repos      []RepoConfig  `yaml:"repos"`
+	ReposDir   string        `yaml:"repos_dir"`
 	Spawn      SpawnConfig   `yaml:"spawn"`
 	StatusBar  StatusBar     `yaml:"status_bar"`
 	Attach     AttachConfig  `yaml:"attach"`
@@ -23,6 +24,7 @@ type Config struct {
 type RepoConfig struct {
 	Owner       string       `yaml:"owner"`
 	Name        string       `yaml:"name"`
+	LocalPath   string       `yaml:"local_path,omitempty"`
 	IssueSource *IssueSource `yaml:"issue_source,omitempty"`
 	Filters     IssueFilters `yaml:"filters"`
 }
@@ -58,6 +60,29 @@ func (r *RepoConfig) IssueRepoFullName() string {
 	}
 
 	return owner + "/" + name
+}
+
+// RepoLocalDir resolves the local filesystem path for a repository.
+// Resolution order:
+//  1. repo.LocalPath (per-repo override)
+//  2. config.ReposDir/<repo.Name> (global repos root)
+//  3. config.Spawn.RepoDir (legacy single-repo setting)
+//  4. ~/<repo.Name> (fallback)
+func (c *Config) RepoLocalDir(repo *RepoConfig) (string, error) {
+	if repo.LocalPath != "" {
+		return repo.LocalPath, nil
+	}
+	if c.ReposDir != "" {
+		return filepath.Join(c.ReposDir, repo.Name), nil
+	}
+	if c.Spawn.RepoDir != "" {
+		return c.Spawn.RepoDir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("determine user home directory: %w", err)
+	}
+	return filepath.Join(home, repo.Name), nil
 }
 
 // DefaultSearch is the fallback issue filter used when no search query
