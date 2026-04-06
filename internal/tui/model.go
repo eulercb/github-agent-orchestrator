@@ -145,7 +145,6 @@ type issuesLoadedMsg struct {
 
 type prsLoadedMsg struct {
 	prs map[string]*github.PullRequest
-	err error
 }
 
 type statusRefreshMsg struct{}
@@ -239,16 +238,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		cmd := m.fetchPRs()
 		return m, tea.Batch(filterCmd, cmd)
 	case prsLoadedMsg:
-		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("PR refresh: %v", msg.err)
-			// Merge successful lookups into existing cache
-			for k, v := range msg.prs {
-				m.prCache[k] = v
-			}
-		} else {
-			m.prCache = msg.prs
-			m.errorMsg = ""
-		}
+		m.prCache = msg.prs
 		return m, filterCmd
 	case statusRefreshMsg:
 		m.sessions.RefreshStatuses()
@@ -604,7 +594,6 @@ func (m *Model) fetchPRs() tea.Cmd {
 	return func() tea.Msg {
 		prs := make(map[string]*github.PullRequest)
 		sessions := m.sessions.Sessions()
-		var firstErr error
 		for i := range sessions {
 			s := &sessions[i]
 			if s.Branch == "" {
@@ -612,14 +601,11 @@ func (m *Model) fetchPRs() tea.Cmd {
 			}
 			pr, err := m.gh.FindPRForBranch(s.Repo, s.Branch)
 			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("%s@%s: %w", s.Repo, s.Branch, err)
-				}
 				continue
 			}
 			prs[prCacheKey(s.Repo, s.Branch)] = pr
 		}
-		return prsLoadedMsg{prs: prs, err: firstErr}
+		return prsLoadedMsg{prs: prs}
 	}
 }
 

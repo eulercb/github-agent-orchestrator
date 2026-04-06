@@ -372,7 +372,11 @@ func runGH(args ...string) ([]byte, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("gh %s: %s: %w", strings.Join(args, " "), string(exitErr.Stderr), err)
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if stderr != "" {
+				return nil, fmt.Errorf("gh %s: %s", args[0], stderr)
+			}
+			return nil, fmt.Errorf("gh %s: %w", args[0], err)
 		}
 		return nil, err
 	}
