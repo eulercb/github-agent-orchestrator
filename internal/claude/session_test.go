@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/config"
+	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/repo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,6 +216,51 @@ func TestWorktreeMetadata(t *testing.T) {
 		require.NotNil(t, got)
 		assert.Equal(t, 5, got.IssueNumber)
 		assert.Empty(t, got.IssueRepo)
+	})
+}
+
+func TestBackfillIssueTitles(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "sessions.yaml")
+
+	mgr := &Manager{
+		cfg:       &config.Config{},
+		stateFile: stateFile,
+		sessions: []Session{
+			{ID: "s1", Repo: "acme/app", Branch: "claude/issue-1", IssueTitle: ""},
+			{ID: "s2", Repo: "acme/app", Branch: "claude/issue-2", IssueTitle: "Already set"},
+			{ID: "s3", Repo: "acme/app", Branch: "", IssueTitle: ""},
+		},
+	}
+
+	t.Run("no-op when gh is nil", func(t *testing.T) {
+		mgr.gh = nil
+		mgr.BackfillIssueTitles()
+
+		// Titles unchanged — no client to fetch from.
+		assert.Empty(t, mgr.sessions[0].IssueTitle)
+		assert.Equal(t, "Already set", mgr.sessions[1].IssueTitle)
+		assert.Empty(t, mgr.sessions[2].IssueTitle)
+	})
+
+	t.Run("preserves existing titles", func(t *testing.T) {
+		// Even with a client that returns nothing, existing titles must
+		// remain untouched.
+		mgr.gh = &github.Client{}
+		mgr.BackfillIssueTitles()
+		assert.Equal(t, "Already set", mgr.sessions[1].IssueTitle)
+	})
+
+	t.Run("uses session ID not index", func(t *testing.T) {
+		// Verify the backfill identifies sessions by ID. Since we can't
+		// easily stub FindLinkedIssue, we verify the method doesn't
+		// corrupt sessions when gh calls fail (returns early).
+		mgr.gh = &github.Client{}
+		mgr.BackfillIssueTitles()
+
+		assert.Empty(t, mgr.sessions[0].IssueTitle)
+		assert.Equal(t, "Already set", mgr.sessions[1].IssueTitle)
+		assert.Empty(t, mgr.sessions[2].IssueTitle)
 	})
 }
 

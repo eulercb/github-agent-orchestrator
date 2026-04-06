@@ -249,14 +249,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		if m.prFetches < 0 {
 			m.prFetches = 0
 		}
-		// Replace the cache with the latest refresh so stale entries
-		// (e.g. deleted PRs) are cleared.
-		m.prCache = msg.prs
-		if m.prCache == nil {
-			m.prCache = make(map[string]*github.PullRequest)
-		}
 		if msg.err != nil {
+			// Preserve previously known PRs when some lookups fail,
+			// and merge in the successfully refreshed entries.
+			if m.prCache == nil {
+				m.prCache = make(map[string]*github.PullRequest)
+			}
+			for k, v := range msg.prs {
+				m.prCache[k] = v
+			}
 			m.errorMsg = fmt.Sprintf("Some PR lookups failed: %v", msg.err)
+		} else {
+			// Replace the cache so stale/deleted PRs are cleared.
+			m.prCache = msg.prs
+			if m.prCache == nil {
+				m.prCache = make(map[string]*github.PullRequest)
+			}
+			m.errorMsg = ""
 		}
 		return m, filterCmd
 	case statusRefreshMsg:
@@ -323,7 +332,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		m.prFetches++
 		return m, tea.Batch(filterCmd, m.fetchPRs(), m.backfillTitles())
 	case titlesBackfilledMsg:
-		return m, nil
+		return m, filterCmd
 	case openBrowserMsg:
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Browser open failed: %v", msg.err)
@@ -636,7 +645,7 @@ func (m *Model) fetchPRs() tea.Cmd {
 			pr, err := m.gh.FindPRForBranch(s.Repo, s.Branch)
 			if err != nil {
 				if firstErr == nil {
-					firstErr = err
+					firstErr = fmt.Errorf("%s@%s: %w", s.Repo, s.Branch, err)
 				}
 				continue
 			}

@@ -247,7 +247,7 @@ func (m *Manager) BackfillIssueTitles() {
 
 	m.mu.RLock()
 	type backfillEntry struct {
-		idx    int
+		id     string
 		repo   string
 		branch string
 	}
@@ -255,7 +255,7 @@ func (m *Manager) BackfillIssueTitles() {
 	for i := range m.sessions {
 		s := &m.sessions[i]
 		if s.IssueTitle == "" && s.Branch != "" && s.Repo != "" {
-			entries = append(entries, backfillEntry{idx: i, repo: s.Repo, branch: s.Branch})
+			entries = append(entries, backfillEntry{id: s.ID, repo: s.Repo, branch: s.Branch})
 		}
 	}
 	m.mu.RUnlock()
@@ -266,7 +266,7 @@ func (m *Manager) BackfillIssueTitles() {
 
 	// Resolve titles outside the lock (makes network calls).
 	type resolved struct {
-		idx   int
+		id    string
 		title string
 	}
 	var results []resolved
@@ -275,7 +275,7 @@ func (m *Manager) BackfillIssueTitles() {
 		if err != nil || linked == nil || linked.Title == "" {
 			continue
 		}
-		results = append(results, resolved{idx: e.idx, title: linked.Title})
+		results = append(results, resolved{id: e.id, title: linked.Title})
 	}
 
 	if len(results) == 0 {
@@ -284,8 +284,11 @@ func (m *Manager) BackfillIssueTitles() {
 
 	m.mu.Lock()
 	for _, r := range results {
-		if r.idx < len(m.sessions) && m.sessions[r.idx].IssueTitle == "" {
-			m.sessions[r.idx].IssueTitle = r.title
+		for i := range m.sessions {
+			if m.sessions[i].ID == r.id && m.sessions[i].IssueTitle == "" {
+				m.sessions[i].IssueTitle = r.title
+				break
+			}
 		}
 	}
 	m.mu.Unlock()
