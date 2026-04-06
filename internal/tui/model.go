@@ -101,7 +101,10 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 
 	// Discover repos at startup
 	var repos []repo.Repo
-	if discovered, err := sessMgr.DiscoverRepos(); err == nil {
+	var initErr string
+	if discovered, err := sessMgr.DiscoverRepos(); err != nil {
+		initErr = fmt.Sprintf("Repo discovery failed: %v", err)
+	} else {
 		repos = discovered
 	}
 
@@ -113,6 +116,7 @@ func NewModel(cfg *config.Config, ghClient *github.Client, sessMgr *claude.Manag
 		keys:        DefaultKeyMap(),
 		prCache:     make(map[string]*github.PullRequest),
 		repos:       repos,
+		errorMsg:    initErr,
 		issueFilter: issueFilter,
 		prFilter:    prFilter,
 		filterInput: ti,
@@ -418,8 +422,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Populate the editor with the current filter for the active panel.
 		switch m.activePanel {
 		case PanelPRs:
+			m.filterInput.Placeholder = config.DefaultPRFilter
 			m.filterInput.SetValue(m.prFilter)
 		default:
+			m.filterInput.Placeholder = config.DefaultIssueFilter
 			m.filterInput.SetValue(m.issueFilter)
 		}
 		m.filterInput.Focus()

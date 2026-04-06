@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/eulercb/github-agent-orchestrator/internal/claude"
+	"github.com/eulercb/github-agent-orchestrator/internal/config"
 	"github.com/eulercb/github-agent-orchestrator/internal/github"
 	"github.com/eulercb/github-agent-orchestrator/internal/tui/styles"
 )
@@ -106,6 +107,9 @@ func (m *Model) renderIssuesPanel(maxHeight int) string {
 	}
 
 	filterText := m.issueFilter
+	if filterText == "" {
+		filterText = config.DefaultIssueFilter
+	}
 	if filterText != "" {
 		// Reserve space for "  / " prefix (4) + "..." suffix (3) + margin (1).
 		maxFilterLen := m.width - lipgloss.Width(header) - 8

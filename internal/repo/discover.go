@@ -40,9 +40,14 @@ var remotePattern = regexp.MustCompile(`github\.com[:/]([^/]+)/([^/\s]+?)(?:\.gi
 // remote. Non-git directories and repos without a GitHub remote are
 // silently skipped.
 func Discover(reposDir string) ([]Repo, error) {
-	entries, err := os.ReadDir(reposDir)
+	absReposDir, err := filepath.Abs(reposDir)
 	if err != nil {
-		return nil, fmt.Errorf("read repos dir %q: %w", reposDir, err)
+		return nil, fmt.Errorf("resolve repos dir %q: %w", reposDir, err)
+	}
+
+	entries, err := os.ReadDir(absReposDir)
+	if err != nil {
+		return nil, fmt.Errorf("read repos dir %q: %w", absReposDir, err)
 	}
 
 	var repos []Repo
@@ -50,7 +55,7 @@ func Discover(reposDir string) ([]Repo, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		dirPath := filepath.Join(reposDir, entry.Name())
+		dirPath := filepath.Join(absReposDir, entry.Name())
 
 		// Quick check: is this a git repo?
 		if _, statErr := os.Stat(filepath.Join(dirPath, ".git")); statErr != nil {
