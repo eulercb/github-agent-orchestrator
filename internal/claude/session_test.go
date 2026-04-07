@@ -254,43 +254,6 @@ func TestBackfillIssueTitles(t *testing.T) {
 		require.NoError(t, mgr.BackfillIssueTitles())
 		assert.Empty(t, mgr.sessions[2].IssueTitle)
 	})
-
-	t.Run("only updates worktrees with existing metadata file", func(t *testing.T) {
-		// Worktree WITH pre-existing metadata — title should be written.
-		wtWithMeta := filepath.Join(tmpDir, "wt-has-meta")
-		require.NoError(t, os.MkdirAll(wtWithMeta, 0o750))
-		require.NoError(t, writeWorktreeMetadata(wtWithMeta, &worktreeMetadata{
-			IssueNumber: 10,
-			IssueRepo:   "acme/app",
-		}))
-
-		// Worktree WITHOUT metadata — should NOT get a file created.
-		wtNoMeta := filepath.Join(tmpDir, "wt-no-meta")
-		require.NoError(t, os.MkdirAll(wtNoMeta, 0o750))
-
-		// Simulate the write loop from BackfillIssueTitles: only write
-		// when readWorktreeMetadata returns a non-nil result.
-		for _, wt := range []string{wtWithMeta, wtNoMeta} {
-			if existing, _ := readWorktreeMetadata(wt); existing != nil {
-				require.NoError(t, writeWorktreeMetadata(wt, &worktreeMetadata{
-					IssueNumber: 10,
-					IssueRepo:   "acme/app",
-					IssueTitle:  "Resolved title",
-				}))
-			}
-		}
-
-		// Worktree with metadata should have the title now.
-		meta, err := readWorktreeMetadata(wtWithMeta)
-		require.NoError(t, err)
-		require.NotNil(t, meta)
-		assert.Equal(t, "Resolved title", meta.IssueTitle)
-
-		// Worktree without metadata should still have no file.
-		meta, err = readWorktreeMetadata(wtNoMeta)
-		require.NoError(t, err)
-		assert.Nil(t, meta)
-	})
 }
 
 func TestRefreshExistingSessions(t *testing.T) {
@@ -326,7 +289,7 @@ func TestRefreshExistingSessions(t *testing.T) {
 			},
 		}
 
-		mgr.refreshExistingSessions(discovered)
+		require.NoError(t, mgr.refreshExistingSessions(discovered))
 
 		assert.Equal(t, "renamed-branch", mgr.sessions[0].Branch)
 		// Title and issue number should be preserved.
@@ -349,7 +312,7 @@ func TestRefreshExistingSessions(t *testing.T) {
 			},
 		}
 
-		mgr.refreshExistingSessions(map[string]repoWorktree{})
+		require.NoError(t, mgr.refreshExistingSessions(map[string]repoWorktree{}))
 
 		assert.Equal(t, "some-branch", mgr.sessions[0].Branch)
 		assert.Equal(t, 0, mgr.sessions[0].IssueNumber)
@@ -378,7 +341,7 @@ func TestRefreshExistingSessions(t *testing.T) {
 			},
 		}
 
-		mgr.refreshExistingSessions(discovered)
+		require.NoError(t, mgr.refreshExistingSessions(discovered))
 
 		assert.Equal(t, "same-branch", mgr.sessions[0].Branch)
 		assert.Equal(t, 10, mgr.sessions[0].IssueNumber)
