@@ -298,6 +298,99 @@ func TestBackfillIssueTitles(t *testing.T) {
 	})
 }
 
+func TestRefreshExistingSessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, "sessions.yaml")
+
+	wtDir := filepath.Join(tmpDir, "worktree-1")
+	require.NoError(t, os.MkdirAll(wtDir, 0o750))
+
+	absWt, err := filepath.Abs(wtDir)
+	require.NoError(t, err)
+
+	t.Run("updates stale branch name", func(t *testing.T) {
+		mgr := &Manager{
+			cfg:       &config.Config{},
+			stateFile: stateFile,
+			sessions: []Session{
+				{
+					ID:           "s1",
+					Repo:         "acme/app",
+					Branch:       "old-branch",
+					IssueNumber:  5,
+					IssueTitle:   "Existing title",
+					WorktreePath: wtDir,
+				},
+			},
+		}
+
+		discovered := map[string]repoWorktree{
+			absWt: {
+				r:  &repo.Repo{Owner: "acme", Name: "app"},
+				wt: Worktree{Path: wtDir, Branch: "renamed-branch"},
+			},
+		}
+
+		mgr.refreshExistingSessions(discovered)
+
+		assert.Equal(t, "renamed-branch", mgr.sessions[0].Branch)
+		// Title and issue number should be preserved.
+		assert.Equal(t, 5, mgr.sessions[0].IssueNumber)
+		assert.Equal(t, "Existing title", mgr.sessions[0].IssueTitle)
+	})
+
+	t.Run("skips sessions not in discovered map", func(t *testing.T) {
+		mgr := &Manager{
+			cfg:       &config.Config{},
+			stateFile: stateFile,
+			sessions: []Session{
+				{
+					ID:           "s2",
+					Repo:         "acme/app",
+					Branch:       "some-branch",
+					IssueNumber:  0,
+					WorktreePath: filepath.Join(tmpDir, "nonexistent"),
+				},
+			},
+		}
+
+		mgr.refreshExistingSessions(map[string]repoWorktree{})
+
+		assert.Equal(t, "some-branch", mgr.sessions[0].Branch)
+		assert.Equal(t, 0, mgr.sessions[0].IssueNumber)
+	})
+
+	t.Run("no-op when nothing changed", func(t *testing.T) {
+		mgr := &Manager{
+			cfg:       &config.Config{},
+			stateFile: stateFile,
+			sessions: []Session{
+				{
+					ID:           "s3",
+					Repo:         "acme/app",
+					Branch:       "same-branch",
+					IssueNumber:  10,
+					IssueTitle:   "Has title",
+					WorktreePath: wtDir,
+				},
+			},
+		}
+
+		discovered := map[string]repoWorktree{
+			absWt: {
+				r:  &repo.Repo{Owner: "acme", Name: "app"},
+				wt: Worktree{Path: wtDir, Branch: "same-branch"},
+			},
+		}
+
+		mgr.refreshExistingSessions(discovered)
+
+		assert.Equal(t, "same-branch", mgr.sessions[0].Branch)
+		assert.Equal(t, 10, mgr.sessions[0].IssueNumber)
+		assert.Equal(t, "Has title", mgr.sessions[0].IssueTitle)
+	})
+}
+
 // initTestGitRepoInDir creates a git repo with an initial commit in the given
 // directory name under parentDir and returns its absolute path.
 func initTestGitRepoInDir(t *testing.T, parentDir, name string) string {

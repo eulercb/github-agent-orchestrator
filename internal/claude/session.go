@@ -555,6 +555,12 @@ func readWorktreeMetadata(worktreePath string) (*worktreeMetadata, error) {
 	return &meta, nil
 }
 
+// repoWorktree pairs a discovered worktree with its parent repo.
+type repoWorktree struct {
+	r  *repo.Repo
+	wt Worktree
+}
+
 // SyncResult summarises the changes made by SyncWorktrees.
 type SyncResult struct {
 	Added   int
@@ -567,11 +573,6 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 	repos, err := m.discoverRepos()
 	if err != nil {
 		return nil, err
-	}
-
-	type repoWorktree struct {
-		r  *repo.Repo
-		wt Worktree
 	}
 
 	// List worktrees for all repos concurrently with bounded parallelism.
@@ -630,13 +631,19 @@ func (m *Manager) SyncWorktrees() (*SyncResult, error) {
 		}
 	}
 
-	// Build set of discovered worktree paths.
+	// Build map of discovered worktree paths for pruning and refresh.
 	discoveredPaths := make(map[string]bool, len(discovered))
+	discoveredByPath := make(map[string]repoWorktree, len(discovered))
 	for _, d := range discovered {
 		if abs, err := filepath.Abs(d.wt.Path); err == nil {
 			discoveredPaths[abs] = true
+			discoveredByPath[abs] = d
 		}
 	}
+
+	// Refresh existing sessions: update branch names and re-resolve missing
+	// issue metadata when the worktree still exists on disk.
+	m.refreshExistingSessions(discoveredByPath)
 
 	// Find which discovered worktrees are not yet tracked.
 	m.mu.RLock()
@@ -784,6 +791,116 @@ func parseWorktreeList(output string) []Worktree {
 	}
 
 	return worktrees
+}
+
+// refreshExistingSessions updates tracked sessions whose worktree still exists
+// on disk. It corrects stale branch names and re-resolves missing issue
+// metadata (number, repo, title) so that sessions created before the branch
+// was renamed or before the PR linked an issue are kept up to date.
+func (m *Manager) refreshExistingSessions(discoveredByPath map[string]repoWorktree) {
+	// Collect sessions that need refreshing under a read lock.
+	type refreshEntry struct {
+		idx    int
+		sess   Session
+		repoWt repoWorktree
+	}
+	m.mu.RLock()
+	var entries []refreshEntry
+	for i := range m.sessions {
+		s := &m.sessions[i]
+		if s.WorktreePath == "" {
+			continue
+		}
+		abs, err := filepath.Abs(s.WorktreePath)
+		if err != nil {
+			continue
+		}
+		d, ok := discoveredByPath[abs]
+		if !ok {
+			continue
+		}
+		branchChanged := d.wt.Branch != s.Branch
+		needsIssue := s.IssueNumber == 0 || s.IssueTitle == ""
+		if branchChanged || needsIssue {
+			entries = append(entries, refreshEntry{idx: i, sess: *s, repoWt: d})
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(entries) == 0 {
+		return
+	}
+
+	// Resolve concurrently outside the lock.
+	type refreshResult struct {
+		idx         int
+		branch      string
+		issueNumber int
+		issueRepo   string
+		issueTitle  string
+	}
+	results := make([]refreshResult, len(entries))
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+	wg.Add(len(entries))
+	for i := range entries {
+		go func(ri int, e *refreshEntry) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			res := refreshResult{
+				idx:    e.idx,
+				branch: e.repoWt.wt.Branch,
+			}
+			// Keep existing values as defaults.
+			res.issueNumber = e.sess.IssueNumber
+			res.issueRepo = e.sess.IssueRepo
+			res.issueTitle = e.sess.IssueTitle
+
+			// Re-resolve issue metadata when missing.
+			if e.sess.IssueNumber == 0 || e.sess.IssueTitle == "" {
+				num, issueRepo, title, err := m.resolveWorktreeIssue(e.repoWt.r, &e.repoWt.wt)
+				if err == nil && num > 0 {
+					res.issueNumber = num
+					res.issueRepo = issueRepo
+					if title != "" {
+						res.issueTitle = title
+					}
+				}
+			}
+			results[ri] = res
+		}(i, &entries[i])
+	}
+	wg.Wait()
+
+	// Apply results under a write lock.
+	m.mu.Lock()
+	changed := false
+	for _, r := range results {
+		s := &m.sessions[r.idx]
+		if s.Branch != r.branch {
+			s.Branch = r.branch
+			changed = true
+		}
+		if s.IssueNumber != r.issueNumber {
+			s.IssueNumber = r.issueNumber
+			changed = true
+		}
+		if s.IssueRepo != r.issueRepo {
+			s.IssueRepo = r.issueRepo
+			changed = true
+		}
+		if s.IssueTitle != r.issueTitle && r.issueTitle != "" {
+			s.IssueTitle = r.issueTitle
+			changed = true
+		}
+	}
+	m.mu.Unlock()
+
+	if changed {
+		_ = m.saveState()
+	}
 }
 
 // resolveWorktreeIssue determines the issue number, repo, and title for a worktree.
