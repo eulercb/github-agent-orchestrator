@@ -394,6 +394,75 @@ func TestSyncWorktrees(t *testing.T) {
 	})
 }
 
+func TestRemoveWorktree(t *testing.T) {
+	reposDir := t.TempDir()
+	stateDir := t.TempDir()
+	repoDir := initTestGitRepoInDir(t, reposDir, "app")
+
+	cfg := &config.Config{
+		ReposDir:   reposDir,
+		SessionDir: stateDir,
+	}
+
+	t.Run("removes worktree and session", func(t *testing.T) {
+		// Create a worktree.
+		wtPath := filepath.Join(repoDir, ".worktrees", "claude-issue-10")
+		cmd := exec.CommandContext(context.Background(), "git", "worktree", "add", "-b", "claude/issue-10", wtPath)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git worktree add: %s", out)
+
+		mgr, err := NewManager(cfg, nil)
+		require.NoError(t, err)
+		mgr.sessions = []Session{
+			{ID: "s-10", Repo: "acme/app", Branch: "claude/issue-10", WorktreePath: wtPath},
+		}
+
+		require.NoError(t, mgr.RemoveWorktree("s-10"))
+		assert.Empty(t, mgr.Sessions())
+
+		// Verify the worktree directory is gone.
+		_, statErr := os.Stat(wtPath)
+		assert.True(t, os.IsNotExist(statErr))
+	})
+
+	t.Run("skips removal when worktree path is main repo", func(t *testing.T) {
+		mgr, err := NewManager(cfg, nil)
+		require.NoError(t, err)
+		mgr.sessions = []Session{
+			{ID: "s-main", Repo: "acme/app", Branch: "main", WorktreePath: repoDir},
+		}
+
+		require.NoError(t, mgr.RemoveWorktree("s-main"))
+		assert.Empty(t, mgr.Sessions())
+
+		// The main repo directory must still exist.
+		_, statErr := os.Stat(repoDir)
+		assert.NoError(t, statErr)
+	})
+
+	t.Run("session not found", func(t *testing.T) {
+		mgr, err := NewManager(cfg, nil)
+		require.NoError(t, err)
+
+		err = mgr.RemoveWorktree("nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("no local repo found", func(t *testing.T) {
+		mgr, err := NewManager(cfg, nil)
+		require.NoError(t, err)
+		mgr.sessions = []Session{
+			{ID: "s-orphan", Repo: "unknown/repo", Branch: "b", WorktreePath: "/tmp/fake"},
+		}
+
+		err = mgr.RemoveWorktree("s-orphan")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no local repo found")
+	})
+}
+
 func TestBuildSessionName(t *testing.T) {
 	r := &repo.Repo{Owner: "acme", Name: "app", LocalPath: "/tmp/app"}
 

@@ -441,8 +441,22 @@ func (m *Manager) RemoveWorktree(id string) error {
 			return fmt.Errorf("no local repo found for %s", sess.Repo)
 		}
 
-		if _, err := gitRun(repoDir, "worktree", "remove", "--force", sess.WorktreePath); err != nil {
-			return fmt.Errorf("git worktree remove: %w", err)
+		repoAbs, err := filepath.Abs(repoDir)
+		if err != nil {
+			return fmt.Errorf("resolve repo path for worktree removal: %w", err)
+		}
+		worktreeAbs, err := filepath.Abs(sess.WorktreePath)
+		if err != nil {
+			return fmt.Errorf("resolve worktree path for removal: %w", err)
+		}
+
+		// Sessions without a dedicated worktree may point WorktreePath at the
+		// repository's primary checkout. Skip git worktree removal in that case
+		// so the session can still be removed from tracking below.
+		if filepath.Clean(repoAbs) != filepath.Clean(worktreeAbs) {
+			if _, err := gitRun(repoDir, "worktree", "remove", "--force", sess.WorktreePath); err != nil {
+				return fmt.Errorf("git worktree remove: %w", err)
+			}
 		}
 	}
 

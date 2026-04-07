@@ -283,6 +283,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 		if msg.err != nil {
 			m.errorMsg = fmt.Sprintf("Remove worktree failed: %v", msg.err)
 		} else {
+			m.errorMsg = ""
 			m.debugLog.Infof("Worktree removed: %s", msg.id)
 			// Clamp cursor after removal
 			sessions := m.sessions.Sessions()
@@ -908,7 +909,7 @@ func (m *Model) removeWorktree() {
 
 	sessID := sess.ID
 	dbg := m.debugLog
-	m.confirmMsg = fmt.Sprintf("Remove worktree for %q? (y/n)", sess.ID)
+	m.confirmMsg = fmt.Sprintf("Force-remove worktree for %q? This may discard uncommitted changes. (y/n)", sess.ID)
 	m.currentView = ViewConfirm
 	m.confirmAction = func() tea.Msg {
 		id := dbg.Start(fmt.Sprintf("Removing worktree %s", sessID))
