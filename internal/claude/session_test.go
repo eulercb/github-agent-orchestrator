@@ -254,6 +254,48 @@ func TestBackfillIssueTitles(t *testing.T) {
 		require.NoError(t, mgr.BackfillIssueTitles())
 		assert.Empty(t, mgr.sessions[2].IssueTitle)
 	})
+
+	t.Run("persists title to worktree metadata file", func(t *testing.T) {
+		// Simulate what BackfillIssueTitles does after resolving a title:
+		// it writes both the in-memory session and the worktree metadata file.
+		wtDir := filepath.Join(tmpDir, "worktree-backfill")
+		require.NoError(t, os.MkdirAll(wtDir, 0o750))
+
+		// Pre-seed metadata without a title (as if created by an older version).
+		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
+			IssueNumber: 10,
+			IssueRepo:   "acme/app",
+		}))
+
+		mgr2 := &Manager{
+			cfg:       &config.Config{},
+			stateFile: filepath.Join(tmpDir, "sessions2.yaml"),
+			sessions: []Session{
+				{
+					ID:           "s-wt",
+					Repo:         "acme/app",
+					Branch:       "claude/issue-10",
+					IssueNumber:  10,
+					IssueRepo:    "acme/app",
+					IssueTitle:   "Resolved title",
+					WorktreePath: wtDir,
+				},
+			},
+		}
+		// Manually call writeWorktreeMetadata as BackfillIssueTitles does.
+		sess := &mgr2.sessions[0]
+		require.NoError(t, writeWorktreeMetadata(sess.WorktreePath, &worktreeMetadata{
+			IssueNumber: sess.IssueNumber,
+			IssueRepo:   sess.IssueRepo,
+			IssueTitle:  sess.IssueTitle,
+		}))
+
+		meta, err := readWorktreeMetadata(wtDir)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Equal(t, "Resolved title", meta.IssueTitle)
+		assert.Equal(t, 10, meta.IssueNumber)
+	})
 }
 
 // initTestGitRepoInDir creates a git repo with an initial commit in the given

@@ -363,6 +363,15 @@ func (m *Manager) BackfillIssueTitles() error {
 		for i := range m.sessions {
 			if m.sessions[i].ID == r.id && m.sessions[i].IssueTitle == "" {
 				m.sessions[i].IssueTitle = r.title
+				// Persist to the worktree metadata file so the title
+				// survives across restarts and re-imports.
+				if m.sessions[i].WorktreePath != "" {
+					_ = writeWorktreeMetadata(m.sessions[i].WorktreePath, &worktreeMetadata{
+						IssueNumber: m.sessions[i].IssueNumber,
+						IssueRepo:   m.sessions[i].IssueRepo,
+						IssueTitle:  r.title,
+					})
+				}
 				break
 			}
 		}
