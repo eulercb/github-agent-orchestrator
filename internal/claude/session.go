@@ -358,18 +358,26 @@ func (m *Manager) BackfillIssueTitles() error {
 		return nil
 	}
 
+	// Collect metadata writes to perform outside the lock.
+	type metaWrite struct {
+		worktreePath string
+		meta         worktreeMetadata
+	}
+	var writes []metaWrite
+
 	m.mu.Lock()
 	for _, r := range results {
 		for i := range m.sessions {
 			if m.sessions[i].ID == r.id && m.sessions[i].IssueTitle == "" {
 				m.sessions[i].IssueTitle = r.title
-				// Persist to the worktree metadata file so the title
-				// survives across restarts and re-imports.
 				if m.sessions[i].WorktreePath != "" {
-					_ = writeWorktreeMetadata(m.sessions[i].WorktreePath, &worktreeMetadata{
-						IssueNumber: m.sessions[i].IssueNumber,
-						IssueRepo:   m.sessions[i].IssueRepo,
-						IssueTitle:  r.title,
+					writes = append(writes, metaWrite{
+						worktreePath: m.sessions[i].WorktreePath,
+						meta: worktreeMetadata{
+							IssueNumber: m.sessions[i].IssueNumber,
+							IssueRepo:   m.sessions[i].IssueRepo,
+							IssueTitle:  r.title,
+						},
 					})
 				}
 				break
@@ -377,6 +385,17 @@ func (m *Manager) BackfillIssueTitles() error {
 		}
 	}
 	m.mu.Unlock()
+
+	// Persist titles to worktree metadata files outside the lock.
+	// Only update worktrees that already have a metadata file to avoid
+	// creating files in the main repo checkout.
+	for _, w := range writes {
+		if existing, _ := readWorktreeMetadata(w.worktreePath); existing != nil {
+			if writeErr := writeWorktreeMetadata(w.worktreePath, &w.meta); writeErr != nil {
+				return fmt.Errorf("persist worktree metadata for %s: %w", w.worktreePath, writeErr)
+			}
+		}
+	}
 
 	if err := m.saveState(); err != nil {
 		return fmt.Errorf("persist backfilled titles: %w", err)

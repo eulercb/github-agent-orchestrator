@@ -255,46 +255,41 @@ func TestBackfillIssueTitles(t *testing.T) {
 		assert.Empty(t, mgr.sessions[2].IssueTitle)
 	})
 
-	t.Run("persists title to worktree metadata file", func(t *testing.T) {
-		// Simulate what BackfillIssueTitles does after resolving a title:
-		// it writes both the in-memory session and the worktree metadata file.
-		wtDir := filepath.Join(tmpDir, "worktree-backfill")
-		require.NoError(t, os.MkdirAll(wtDir, 0o750))
-
-		// Pre-seed metadata without a title (as if created by an older version).
-		require.NoError(t, writeWorktreeMetadata(wtDir, &worktreeMetadata{
+	t.Run("only updates worktrees with existing metadata file", func(t *testing.T) {
+		// Worktree WITH pre-existing metadata — title should be written.
+		wtWithMeta := filepath.Join(tmpDir, "wt-has-meta")
+		require.NoError(t, os.MkdirAll(wtWithMeta, 0o750))
+		require.NoError(t, writeWorktreeMetadata(wtWithMeta, &worktreeMetadata{
 			IssueNumber: 10,
 			IssueRepo:   "acme/app",
 		}))
 
-		mgr2 := &Manager{
-			cfg:       &config.Config{},
-			stateFile: filepath.Join(tmpDir, "sessions2.yaml"),
-			sessions: []Session{
-				{
-					ID:           "s-wt",
-					Repo:         "acme/app",
-					Branch:       "claude/issue-10",
-					IssueNumber:  10,
-					IssueRepo:    "acme/app",
-					IssueTitle:   "Resolved title",
-					WorktreePath: wtDir,
-				},
-			},
-		}
-		// Manually call writeWorktreeMetadata as BackfillIssueTitles does.
-		sess := &mgr2.sessions[0]
-		require.NoError(t, writeWorktreeMetadata(sess.WorktreePath, &worktreeMetadata{
-			IssueNumber: sess.IssueNumber,
-			IssueRepo:   sess.IssueRepo,
-			IssueTitle:  sess.IssueTitle,
-		}))
+		// Worktree WITHOUT metadata — should NOT get a file created.
+		wtNoMeta := filepath.Join(tmpDir, "wt-no-meta")
+		require.NoError(t, os.MkdirAll(wtNoMeta, 0o750))
 
-		meta, err := readWorktreeMetadata(wtDir)
+		// Simulate the write loop from BackfillIssueTitles: only write
+		// when readWorktreeMetadata returns a non-nil result.
+		for _, wt := range []string{wtWithMeta, wtNoMeta} {
+			if existing, _ := readWorktreeMetadata(wt); existing != nil {
+				require.NoError(t, writeWorktreeMetadata(wt, &worktreeMetadata{
+					IssueNumber: 10,
+					IssueRepo:   "acme/app",
+					IssueTitle:  "Resolved title",
+				}))
+			}
+		}
+
+		// Worktree with metadata should have the title now.
+		meta, err := readWorktreeMetadata(wtWithMeta)
 		require.NoError(t, err)
 		require.NotNil(t, meta)
 		assert.Equal(t, "Resolved title", meta.IssueTitle)
-		assert.Equal(t, 10, meta.IssueNumber)
+
+		// Worktree without metadata should still have no file.
+		meta, err = readWorktreeMetadata(wtNoMeta)
+		require.NoError(t, err)
+		assert.Nil(t, meta)
 	})
 }
 
