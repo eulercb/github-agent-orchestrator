@@ -62,15 +62,6 @@ var (
 	MutedText = lipgloss.NewStyle().
 			Foreground(Muted)
 
-	// StatusWorking styles the working status indicator.
-	StatusWorking = lipgloss.NewStyle().Foreground(Warning).Bold(true)
-	// StatusWaiting styles the waiting status indicator.
-	StatusWaiting = lipgloss.NewStyle().Foreground(Secondary).Bold(true)
-	// StatusDone styles the done status indicator.
-	StatusDone = lipgloss.NewStyle().Foreground(Success).Bold(true)
-	// StatusStopped styles the stopped status indicator.
-	StatusStopped = lipgloss.NewStyle().Foreground(Danger).Bold(true)
-
 	// PRDraft styles draft PR labels.
 	PRDraft = lipgloss.NewStyle().Foreground(Muted)
 	// PROpen styles open PR labels.

@@ -3,7 +3,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/eulercb/github-agent-orchestrator?label=download&sort=semver)](https://github.com/eulercb/github-agent-orchestrator/releases/latest)
 [![CI](https://github.com/eulercb/github-agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/eulercb/github-agent-orchestrator/actions/workflows/ci.yml)
 
-A terminal dashboard for spawning and managing [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions alongside GitHub issues and pull requests.
+A terminal dashboard for visualizing and navigating [Claude Code](https://docs.anthropic.com/en/docs/claude-code) worktrees alongside GitHub issues and pull requests.
 
 ```
 +--------------------------------------------------------------------+
@@ -15,22 +15,22 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 |    #44  Refactor auth module                             [refactor]|
 +--------------------------------------------------------------------+
 |  Sessions                                                          |
-|  #42  claude/issue-42   * working    PR #50 draft                  |
-|  #43  claude/issue-43   + done       PR #51 approved               |
-|  #44  claude/issue-44   ~ waiting    --                            |
+|  #42  PR #50 draft       Fix login bug                             |
+|  #43  PR #51 approved    Add dark mode                             |
+|  #44  --                 Refactor auth module                      |
 +--------------------------------------------------------------------+
-|  Sessions: 3  * 1 working  ~ 1 waiting  + 1 done                   |
-|  j/k nav  tab switch  s spawn  a attach  o open  ? help  q quit    |
+|  Sessions: 3                                                        |
+|  j/k nav  tab switch  a worktree  o open  ? help  q quit           |
 +--------------------------------------------------------------------+
 ```
 
 ## The workflow
 
-1. **See your issues** — gao fetches open issues from the first configured repo (filtered by assignee, labels, etc.)
-2. **Spawn an agent** — Press `s` on an issue to create a Claude Code session in a git worktree
-3. **Monitor progress** — The dashboard auto-refreshes session statuses (working / waiting / done) and tracks PRs by branch
-4. **Jump into a session** — Press `a` to attach (opens a Warp tab if available, or suspends the TUI and launches an interactive Claude session)
-5. **Review the result** — Press `o` to open the linked PR in your browser
+1. **See your issues** — gao fetches open issues from your configured repos (filtered by assignee, labels, etc.)
+2. **Scan worktrees** — Press `w` to discover Claude Code worktrees across your repos
+3. **Navigate to a worktree** — Press `a` to open the worktree directory in a new terminal
+4. **Check PR status** — The dashboard tracks PRs by branch, showing draft/open/approved/merged status
+5. **Review the result** — Press `o` to open the linked PR or issue in your browser
 
 ## Requirements
 
@@ -38,8 +38,7 @@ A terminal dashboard for spawning and managing [Claude Code](https://docs.anthro
 |------|----------|---------|
 | [Go](https://go.dev/) 1.24+ | Build only | Compiling gao |
 | [gh](https://cli.github.com/) | Yes | GitHub API (issues, PRs) |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Yes | The AI agent |
-| [Warp](https://www.warp.dev/) | No | Optional: opens sessions in new Warp tabs |
+| [Warp](https://www.warp.dev/) | No | Optional: opens worktrees in new Warp tabs |
 | [ccusage](https://github.com/ryoppippi/ccusage) | No | Optional: token usage tracking in the status bar |
 
 ## Install
@@ -96,11 +95,13 @@ gao
 |-----|--------|
 | `↑`/`k` `↓`/`j` | Navigate |
 | `Tab` | Switch between Issues and Sessions panels |
-| `s` | Spawn a Claude Code session for the selected issue |
-| `a` | Attach to the selected session |
+| `a` | Open the selected session's worktree in a new terminal |
+| `w` | Scan and import discovered worktrees |
 | `o` | Open issue or PR in the browser |
-| `x` | Kill the selected session |
-| `r` | Refresh issues and statuses |
+| `O` | Open session's linked issue in the browser |
+| `x` | Remove the selected session's worktree |
+| `/` | Filter issues (GitHub search syntax) |
+| `r` | Refresh issues and PRs |
 | `?` | Toggle help |
 | `q` | Quit |
 
