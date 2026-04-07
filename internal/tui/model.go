@@ -170,12 +170,7 @@ type statusBarUpdatedMsg struct {
 	text string
 }
 
-type sessionSpawnedMsg struct {
-	session *claude.Session
-	err     error
-}
-
-type sessionKilledMsg struct {
+type worktreeRemovedMsg struct {
 	id  string
 	err error
 }
@@ -284,20 +279,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // t
 	case statusBarUpdatedMsg:
 		m.statusBarText = msg.text
 		return m, filterCmd
-	case sessionSpawnedMsg:
+	case worktreeRemovedMsg:
 		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("Spawn failed: %v", msg.err)
+			m.errorMsg = fmt.Sprintf("Remove worktree failed: %v", msg.err)
 		} else {
-			m.errorMsg = ""
-			m.activePanel = PanelSessions
-			m.debugLog.Infof("Session spawned: %s", msg.session.ID)
-		}
-		return m, filterCmd
-	case sessionKilledMsg:
-		if msg.err != nil {
-			m.errorMsg = fmt.Sprintf("Kill failed: %v", msg.err)
-		} else {
-			m.debugLog.Infof("Session killed: %s", msg.id)
+			m.debugLog.Infof("Worktree removed: %s", msg.id)
 			// Clamp cursor after removal
 			sessions := m.sessions.Sessions()
 			lastIdx := len(sessions) - 1
@@ -414,11 +400,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursor(-1)
 	case key.Matches(msg, m.keys.Down):
 		m.moveCursor(1)
-	case key.Matches(msg, m.keys.Spawn):
-		if m.activePanel == PanelIssues && m.showIssues {
-			cmd := m.spawnSession()
-			return m, cmd
-		}
 	case key.Matches(msg, m.keys.Worktree):
 		if m.activePanel == PanelSessions {
 			cmd := m.openWorktree()
@@ -439,9 +420,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.openSessionIssueBrowser()
 			return m, cmd
 		}
-	case key.Matches(msg, m.keys.Delete):
+	case key.Matches(msg, m.keys.RemoveWorktree):
 		if m.activePanel == PanelSessions {
-			m.killSession()
+			m.removeWorktree()
 		}
 	case key.Matches(msg, m.keys.Refresh):
 		m.loading = true
@@ -631,20 +612,6 @@ func (m *Model) selectedSession() *claude.Session {
 	return nil
 }
 
-// findRepoForIssue finds the discovered repo that matches the issue's repository.
-func (m *Model) findRepoForIssue(issueRepo string) *repo.Repo {
-	for i := range m.repos {
-		if m.repos[i].FullName() == issueRepo {
-			return &m.repos[i]
-		}
-	}
-	// Fall back to first discovered repo if we only have one.
-	if len(m.repos) == 1 {
-		return &m.repos[0]
-	}
-	return nil
-}
-
 // Commands
 
 func (m *Model) fetchIssues() tea.Cmd {
@@ -764,54 +731,6 @@ func (m *Model) backfillTitles() tea.Cmd {
 			dbg.Finish(id, "")
 		}
 		return titlesBackfilledMsg{err: err}
-	}
-}
-
-func (m *Model) spawnSession() tea.Cmd {
-	issue := m.selectedIssue()
-	if issue == nil {
-		return nil
-	}
-
-	if len(m.repos) == 0 {
-		m.errorMsg = "No repos discovered in repos_dir"
-		return nil
-	}
-
-	// Determine which issue repo this belongs to.
-	issueRepo := issue.Repository.NameWithOwner
-
-	// Find the target repo for spawning (where the session/PR will live).
-	r := m.findRepoForIssue(issueRepo)
-	if r == nil {
-		m.errorMsg = fmt.Sprintf("No local repo found for %s", issueRepo)
-		return nil
-	}
-
-	// Check if session already exists for this issue
-	if issueRepo == "" {
-		issueRepo = r.FullName()
-	}
-	existing := m.sessions.FindByIssue(issueRepo, issue.Number)
-	if existing != nil {
-		m.errorMsg = fmt.Sprintf("Session already exists for issue #%d", issue.Number)
-		return nil
-	}
-
-	issueNum := issue.Number
-	issueTitle := issue.Title
-	repoCopy := *r
-	dbg := m.debugLog
-
-	return func() tea.Msg {
-		id := dbg.Start(fmt.Sprintf("Spawning session for #%d: %s", issueNum, issueTitle))
-		sess, err := m.sessions.SpawnSession(&repoCopy, issueRepo, issueNum, issueTitle)
-		if err != nil {
-			dbg.Error(id, err)
-		} else {
-			dbg.Finish(id, fmt.Sprintf("session %s (PID %d)", sess.ID, sess.PID))
-		}
-		return sessionSpawnedMsg{session: sess, err: err}
 	}
 }
 
@@ -981,7 +900,7 @@ func (m *Model) openSessionIssueBrowser() tea.Cmd {
 	}
 }
 
-func (m *Model) killSession() {
+func (m *Model) removeWorktree() {
 	sess := m.selectedSession()
 	if sess == nil {
 		return
@@ -989,17 +908,17 @@ func (m *Model) killSession() {
 
 	sessID := sess.ID
 	dbg := m.debugLog
-	m.confirmMsg = fmt.Sprintf("Kill session %q? (y/n)", sess.ID)
+	m.confirmMsg = fmt.Sprintf("Remove worktree for %q? (y/n)", sess.ID)
 	m.currentView = ViewConfirm
 	m.confirmAction = func() tea.Msg {
-		id := dbg.Start(fmt.Sprintf("Killing session %s", sessID))
-		err := m.sessions.RemoveSession(sessID, true)
+		id := dbg.Start(fmt.Sprintf("Removing worktree %s", sessID))
+		err := m.sessions.RemoveWorktree(sessID)
 		if err != nil {
 			dbg.Error(id, err)
 		} else {
 			dbg.Finish(id, "removed")
 		}
-		return sessionKilledMsg{id: sessID, err: err}
+		return worktreeRemovedMsg{id: sessID, err: err}
 	}
 }
 
@@ -1015,38 +934,8 @@ func (m *Model) refreshStatusBar() tea.Cmd {
 			}
 		}
 
-		// Built-in fallback: session counts
-		var running, waiting, done, stopped int
-		for i := range sessions {
-			switch sessions[i].Status {
-			case claude.StatusRunning:
-				running++
-			case claude.StatusWaiting:
-				waiting++
-			case claude.StatusDone:
-				done++
-			case claude.StatusStopped:
-				stopped++
-			}
-		}
-
-		parts := []string{
-			fmt.Sprintf("Sessions: %d", len(sessions)),
-		}
-		if running > 0 {
-			parts = append(parts, fmt.Sprintf("⚡ %d working", running))
-		}
-		if waiting > 0 {
-			parts = append(parts, fmt.Sprintf("⏳ %d waiting", waiting))
-		}
-		if done > 0 {
-			parts = append(parts, fmt.Sprintf("✓ %d done", done))
-		}
-		if stopped > 0 {
-			parts = append(parts, fmt.Sprintf("✗ %d stopped", stopped))
-		}
-
-		return statusBarUpdatedMsg{text: strings.Join(parts, "  ")}
+		// Built-in fallback: session count
+		return statusBarUpdatedMsg{text: fmt.Sprintf("Sessions: %d", len(sessions))}
 	}
 }
 

@@ -401,6 +401,70 @@ func (m *Manager) RemoveSession(id string, killProcess bool) error {
 	return m.saveStateLocked()
 }
 
+// RemoveWorktree removes the git worktree for a session and removes the session
+// from tracking. It discovers repos to find the parent repo's local path, then
+// runs `git worktree remove --force` on the worktree directory.
+func (m *Manager) RemoveWorktree(id string) error {
+	m.mu.Lock()
+
+	idx := -1
+	for i := range m.sessions {
+		if m.sessions[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		m.mu.Unlock()
+		return fmt.Errorf("session %q not found", id)
+	}
+
+	sess := m.sessions[idx]
+	m.mu.Unlock()
+
+	// Remove the git worktree if it has a path.
+	if sess.WorktreePath != "" {
+		repos, err := m.discoverRepos()
+		if err != nil {
+			return fmt.Errorf("discover repos for worktree removal: %w", err)
+		}
+
+		// Find the parent repo to run git worktree remove from.
+		var repoDir string
+		for i := range repos {
+			if repos[i].FullName() == sess.Repo {
+				repoDir = repos[i].LocalPath
+				break
+			}
+		}
+		if repoDir == "" {
+			return fmt.Errorf("no local repo found for %s", sess.Repo)
+		}
+
+		if _, err := gitRun(repoDir, "worktree", "remove", "--force", sess.WorktreePath); err != nil {
+			return fmt.Errorf("git worktree remove: %w", err)
+		}
+	}
+
+	// Remove the session from tracking.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Re-find index since the slice may have changed while unlocked.
+	idx = -1
+	for i := range m.sessions {
+		if m.sessions[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return nil // already removed
+	}
+	m.sessions = append(m.sessions[:idx], m.sessions[idx+1:]...)
+	return m.saveStateLocked()
+}
+
 // FindByIssue finds a session for a specific issue.
 func (m *Manager) FindByIssue(issueRepo string, issueNumber int) *Session {
 	m.mu.RLock()

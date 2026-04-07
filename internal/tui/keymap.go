@@ -9,12 +9,11 @@ type KeyMap struct {
 	Back            key.Binding
 	Quit            key.Binding
 	Tab             key.Binding
-	Spawn           key.Binding
 	Worktree        key.Binding
 	ImportWorktrees key.Binding
 	Open            key.Binding
 	OpenIssue       key.Binding
-	Delete          key.Binding
+	RemoveWorktree  key.Binding
 	Refresh         key.Binding
 	Help            key.Binding
 	Filter          key.Binding
@@ -46,10 +45,6 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "switch panel"),
 		),
-		Spawn: key.NewBinding(
-			key.WithKeys("s"),
-			key.WithHelp("s", "spawn agent"),
-		),
 		Worktree: key.NewBinding(
 			key.WithKeys("a"),
 			key.WithHelp("a", "open worktree"),
@@ -66,9 +61,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("O"),
 			key.WithHelp("O", "open issue in browser"),
 		),
-		Delete: key.NewBinding(
+		RemoveWorktree: key.NewBinding(
 			key.WithKeys("x"),
-			key.WithHelp("x", "kill session"),
+			key.WithHelp("x", "remove worktree"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),

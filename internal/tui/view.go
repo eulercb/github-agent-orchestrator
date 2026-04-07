@@ -275,12 +275,11 @@ func (m *Model) renderSessionsPanel(maxHeight int) string {
 	sessions := m.sessions.Sessions()
 
 	if len(sessions) == 0 {
-		hint := "  No active sessions."
-		if m.showIssues {
-			hint += " Select an issue and press 's' to spawn."
-		} else {
-			hint += " Press 'w' to scan worktrees or 'i' to show issues."
+		hint := "  No sessions found. Press 'w' to scan worktrees"
+		if !m.showIssues {
+			hint += " or 'i' to show issues"
 		}
+		hint += "."
 		lines = append(lines, styles.MutedText.Render(hint))
 	}
 
@@ -309,35 +308,7 @@ func (m *Model) renderSessionsPanel(maxHeight int) string {
 }
 
 func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
-	// Status icon and text
-	var statusIcon, statusText string
-	var statusStyle lipgloss.Style
-	switch sess.Status {
-	case claude.StatusRunning:
-		statusIcon = "⚡"
-		statusText = "working"
-		statusStyle = styles.StatusWorking
-	case claude.StatusWaiting:
-		statusIcon = "⏳"
-		statusText = "waiting"
-		statusStyle = styles.StatusWaiting
-	case claude.StatusDone:
-		statusIcon = "✓"
-		statusText = "done"
-		statusStyle = styles.StatusDone
-	case claude.StatusStopped:
-		statusIcon = "✗"
-		statusText = "stopped"
-		statusStyle = styles.StatusStopped
-	default:
-		statusIcon = "?"
-		statusText = "unknown"
-		statusStyle = styles.MutedText
-	}
-
 	issueRef := fmt.Sprintf("#%-5d", sess.IssueNumber)
-
-	statusStr := statusStyle.Render(fmt.Sprintf("%s %s", statusIcon, statusText))
 
 	// PR info
 	prStr := styles.MutedText.Render("—")
@@ -351,8 +322,8 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 		issueTitle = sess.Branch
 	}
 	// Calculate space used by fixed columns:
-	// "  " + issueRef + " " + status + "  " + prStr + "  "
-	fixedWidth := 2 + lipgloss.Width(issueRef) + 1 + lipgloss.Width(statusStr) + 2 + lipgloss.Width(prStr) + 2
+	// "  " + issueRef + " " + prStr + "  "
+	fixedWidth := 2 + lipgloss.Width(issueRef) + 1 + lipgloss.Width(prStr) + 2
 	maxTitle := m.width - fixedWidth
 	if maxTitle < 10 {
 		maxTitle = 10
@@ -361,17 +332,7 @@ func (m *Model) renderSessionLine(sess *claude.Session, selected bool) string {
 		issueTitle = ansi.Truncate(issueTitle, maxTitle-3, "...")
 	}
 
-	content := fmt.Sprintf("  %s %s  %s  %s", issueRef, statusStr, prStr, issueTitle)
-
-	// Add last activity
-	if sess.LastActivity != "" && !selected {
-		activitySnippet := sess.LastActivity
-		activityRunes := []rune(activitySnippet)
-		if len(activityRunes) > 40 {
-			activitySnippet = string(activityRunes[:37]) + "..."
-		}
-		content += styles.MutedText.Render("  " + activitySnippet)
-	}
+	content := fmt.Sprintf("  %s %s  %s", issueRef, prStr, issueTitle)
 
 	if selected {
 		return styles.SelectedItem.Width(m.width).Render(content)
@@ -503,9 +464,9 @@ func (m *Model) renderHelpBar() string {
 	var items []string
 	switch m.activePanel {
 	case PanelIssues:
-		items = []string{"↑↓ navigate", "tab switch", "/ filter", "s spawn", "w scan", "o open", "i hide issues", "d debug", "r refresh", "? help", "q quit"}
+		items = []string{"↑↓ navigate", "tab switch", "/ filter", "w scan", "o open", "i hide issues", "d debug", "r refresh", "? help", "q quit"}
 	case PanelSessions:
-		items = []string{"↑↓ navigate", "a worktree", "w scan", "o open PR", "O open issue", "x kill"}
+		items = []string{"↑↓ navigate", "a worktree", "w scan", "o open PR", "O open issue", "x remove worktree"}
 		if m.showIssues {
 			items = append(items, "tab switch", "i hide issues")
 		} else {
@@ -532,15 +493,14 @@ func (m *Model) viewHelp() string {
 
   Actions:
     /            Edit issue filter (GitHub search syntax, in Issues panel)
-    s            Spawn a new Claude Code session for selected issue
     a            Open worktree directory in a new terminal
     w            Scan worktrees (discover new, remove stale)
     o            Open selected issue (Issues) or session PR (Sessions) in browser
     O            Open session's issue in browser (Sessions panel)
-    x            Kill selected session
+    x            Remove selected session's worktree
     i            Toggle issues panel visibility
     d            Toggle debug log pane
-    r            Refresh issues and session statuses
+    r            Refresh issues and PRs
 
   Other:
     ?            Toggle this help screen
